@@ -1,3 +1,4 @@
+\
 on:
     workflow_call:
       inputs:
@@ -46,8 +47,8 @@ jobs:
 
       - uses: lukka/get-cmake@latest
         with:
-          cmakeVersion: "~4.3.0"  # use most recent 4.3.x version
-          useLocalCache: true         # <--= Use the local cache (default is 'false').
+          cmakeVersion: "~4.3.0"
+          useLocalCache: true
           useCloudCache: true
 
       - name: Get the version and date on Ubuntu and macOS
@@ -92,6 +93,28 @@ jobs:
           echo "git_commit_hash=$git_commit_hash" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
           echo "date: ${{ env.date }} version: ${{ env.ver }}"
         shell: pwsh
+
+      - name: Download linux host runtime artifact
+        if: ${{ runner.os != 'Linux' && !(runner.os == 'macOS' && inputs.macos-combine-only) }}
+        uses: actions/download-artifact@v8
+        with:
+          name: linux_host_runtime_${{ github.sha }}
+          path: ${{ github.workspace }}/linux_host_runtime_artifact
+
+      - name: Extract linux host runtime artifact on macOS
+        if: ${{ runner.os == 'macOS' && !inputs.macos-combine-only }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          mkdir -p tools/pjarczak_bambu_linux_host/runtime
+          tar -xzvf linux_host_runtime_artifact/linux_host_runtime_${{ github.sha }}.tar.gz -C tools/pjarczak_bambu_linux_host/runtime
+
+      - name: Extract linux host runtime artifact on Windows
+        if: ${{ runner.os == 'Windows' }}
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\tools\pjarczak_bambu_linux_host\runtime" | Out-Null
+          tar -xzf "$env:GITHUB_WORKSPACE\linux_host_runtime_artifact\linux_host_runtime_${{ github.sha }}.tar.gz" -C "$env:GITHUB_WORKSPACE\tools\pjarczak_bambu_linux_host\runtime"
 
 #   Mac
       - name: Install tools mac
@@ -161,7 +184,7 @@ jobs:
             OrcaSlicer_Mac_bundle_arm64_${{ github.sha }}
             OrcaSlicer_Mac_bundle_x86_64_${{ github.sha }}
 
- # Thanks to RaySajuuk, it's working now
+# Thanks to RaySajuuk, it's working now
       - name: Sign app and notary
         if: github.repository == 'OrcaSlicer/OrcaSlicer' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && runner.os == 'macOS' && inputs.macos-combine-only
         working-directory: ${{ github.workspace }}
@@ -177,44 +200,29 @@ jobs:
           security create-keychain -p $KEYCHAIN_PASSWORD $KEYCHAIN_PATH
           security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
           security unlock-keychain -p $KEYCHAIN_PASSWORD $KEYCHAIN_PATH
-          # Set the temporary keychain as the default to prevent codesign from accessing the locked login keychain
           security default-keychain -s "$KEYCHAIN_PATH"
           security import $CERTIFICATE_PATH -P $P12_PASSWORD -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
           security list-keychain -d user -s $KEYCHAIN_PATH
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k $P12_PASSWORD $KEYCHAIN_PATH
           codesign --deep --force --verbose --options runtime --timestamp --entitlements ${{ github.workspace }}/scripts/disable_validation.entitlements --sign "$CERTIFICATE_ID" ${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer.app
-          # Sign OrcaSlicer_profile_validator.app if it exists
           if [ -f "${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer_profile_validator.app/Contents/MacOS/OrcaSlicer_profile_validator" ]; then
             codesign --deep --force --verbose --options runtime --timestamp --entitlements ${{ github.workspace }}/scripts/disable_validation.entitlements --sign "$CERTIFICATE_ID" ${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer_profile_validator.app
           fi
-          
-          # Create main OrcaSlicer DMG without the profile validator helper
+
           mkdir -p ${{ github.workspace }}/build/universal/OrcaSlicer_dmg
           rm -rf ${{ github.workspace }}/build/universal/OrcaSlicer_dmg/*
           cp -R ${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer.app ${{ github.workspace }}/build/universal/OrcaSlicer_dmg/
           ln -sfn /Applications ${{ github.workspace }}/build/universal/OrcaSlicer_dmg/Applications
           hdiutil create -volname "OrcaSlicer" -srcfolder ${{ github.workspace }}/build/universal/OrcaSlicer_dmg -ov -format UDZO OrcaSlicer_Mac_universal_${{ env.ver }}.dmg
           codesign --deep --force --verbose --options runtime --timestamp --entitlements ${{ github.workspace }}/scripts/disable_validation.entitlements --sign "$CERTIFICATE_ID" OrcaSlicer_Mac_universal_${{ env.ver }}.dmg
-          
-          # Create separate OrcaSlicer_profile_validator DMG if the app exists
-          if [ -f "${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer_profile_validator.app/Contents/MacOS/OrcaSlicer_profile_validator" ]; then
-            mkdir -p ${{ github.workspace }}/build/universal/OrcaSlicer_profile_validator_dmg
-            rm -rf ${{ github.workspace }}/build/universal/OrcaSlicer_profile_validator_dmg/*
-            cp -R ${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer_profile_validator.app ${{ github.workspace }}/build/universal/OrcaSlicer_profile_validator_dmg/
-            ln -sfn /Applications ${{ github.workspace }}/build/universal/OrcaSlicer_profile_validator_dmg/Applications
-            hdiutil create -volname "OrcaSlicer Profile Validator" -srcfolder ${{ github.workspace }}/build/universal/OrcaSlicer_profile_validator_dmg -ov -format UDZO OrcaSlicer_profile_validator_Mac_universal_${{ env.ver }}.dmg
-            codesign --deep --force --verbose --options runtime --timestamp --entitlements ${{ github.workspace }}/scripts/disable_validation.entitlements --sign "$CERTIFICATE_ID" OrcaSlicer_profile_validator_Mac_universal_${{ env.ver }}.dmg
-          fi
-          
-          # Notarize main DMG
-          xcrun notarytool submit "OrcaSlicer_Mac_universal_${{ env.ver }}.dmg" --apple-id "${{ secrets.APPLE_DEV_ACCOUNT }}" --team-id "${{ secrets.TEAM_ID }}" --password "${{ secrets.APP_PWD }}" --wait
-          xcrun stapler staple OrcaSlicer_Mac_universal_${{ env.ver }}.dmg
 
-          # Notarize profile validator DMG if it exists
           if [ -f "OrcaSlicer_profile_validator_Mac_universal_${{ env.ver }}.dmg" ]; then
             xcrun notarytool submit "OrcaSlicer_profile_validator_Mac_universal_${{ env.ver }}.dmg" --apple-id "${{ secrets.APPLE_DEV_ACCOUNT }}" --team-id "${{ secrets.TEAM_ID }}" --password "${{ secrets.APP_PWD }}" --wait
             xcrun stapler staple OrcaSlicer_profile_validator_Mac_universal_${{ env.ver }}.dmg
           fi
+
+          xcrun notarytool submit "OrcaSlicer_Mac_universal_${{ env.ver }}.dmg" --apple-id "${{ secrets.APPLE_DEV_ACCOUNT }}" --team-id "${{ secrets.TEAM_ID }}" --password "${{ secrets.APP_PWD }}" --wait
+          xcrun stapler staple OrcaSlicer_Mac_universal_${{ env.ver }}.dmg
 
       - name: Create DMG without notary
         if: github.ref != 'refs/heads/main' && runner.os == 'macOS' && inputs.macos-combine-only
@@ -225,8 +233,7 @@ jobs:
           cp -R ${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer.app ${{ github.workspace }}/build/universal/OrcaSlicer_dmg/
           ln -sfn /Applications ${{ github.workspace }}/build/universal/OrcaSlicer_dmg/Applications
           hdiutil create -volname "OrcaSlicer" -srcfolder ${{ github.workspace }}/build/universal/OrcaSlicer_dmg -ov -format UDZO OrcaSlicer_Mac_universal_${{ env.ver }}.dmg
-          
-          # Create separate OrcaSlicer_profile_validator DMG if the app exists
+
           if [ -f "${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer_profile_validator.app/Contents/MacOS/OrcaSlicer_profile_validator" ]; then
             mkdir -p ${{ github.workspace }}/build/universal/OrcaSlicer_profile_validator_dmg
             rm -rf ${{ github.workspace }}/build/universal/OrcaSlicer_profile_validator_dmg/*
@@ -259,7 +266,7 @@ jobs:
           asset_path: ${{ github.workspace }}/OrcaSlicer_Mac_universal_${{ env.ver }}.dmg
           asset_name: OrcaSlicer_Mac_universal_nightly.dmg
           asset_content_type: application/octet-stream
-          max_releases: 1 # optional, if there are more releases than this matching the asset_name, the oldest ones are going to be deleted
+          max_releases: 1
 
       - name: Deploy Mac OrcaSlicer_profile_validator DMG release
         if: github.repository == 'OrcaSlicer/OrcaSlicer' && github.ref == 'refs/heads/main' && runner.os == 'macOS' && inputs.macos-combine-only && !vars.SELF_HOSTED
@@ -375,19 +382,26 @@ jobs:
         if: runner.os == 'Linux' && !vars.SELF_HOSTED
         uses: ./.github/actions/apt-install-deps
 
-        # Tests must built at the same time as the slicer;
-        # if you untangle them feel free to separate them here too
       - name: Build slicer and tests
         if: runner.os == 'Linux'
         shell: bash
         run: |
           ./build_linux.sh -istrlL
+          cmake --build build --config Release --target pjarczak_bambu_linux_host
+          bash tools/pjarczak_bambu_linux_host/package_linux_host_runtime.sh build
+          tar -czvf linux_host_runtime_${{ github.sha }}.tar.gz -C tools/pjarczak_bambu_linux_host/runtime linux-x86_64
           mv -n ./build/OrcaSlicer_Linux_V${{ env.ver_pure }}.AppImage ./build/OrcaSlicer_Linux_AppImage${{ env.ubuntu-ver-str }}_${{ env.ver }}.AppImage
           chmod +x ./build/OrcaSlicer_Linux_AppImage${{ env.ubuntu-ver-str }}_${{ env.ver }}.AppImage
           tar -cvpf build_tests.tar build/tests
 
-        # Use tar because upload-artifacts won't always preserve directory structure
-        # and doesn't preserve file permissions
+      - name: Upload linux host runtime artifact
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux_host_runtime_${{ github.sha }}
+          path: ./linux_host_runtime_${{ github.sha }}.tar.gz
+          if-no-files-found: error
+
       - name: Upload Test Artifact
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
@@ -430,7 +444,8 @@ jobs:
           asset_path: ./build/OrcaSlicer_Linux_AppImage${{ env.ubuntu-ver-str }}_${{ env.ver }}.AppImage
           asset_name: OrcaSlicer_Linux_AppImage${{ env.ubuntu-ver-str }}_nightly.AppImage
           asset_content_type: application/octet-stream
-          max_releases: 1 # optional, if there are more releases than this matching the asset_name, the oldest ones are going to be deleted
+          max_releases: 1
+
       - name: Deploy Ubuntu release
         if: ${{ github.repository == 'OrcaSlicer/OrcaSlicer' && ! env.ACT && github.ref == 'refs/heads/main' && runner.os == 'Linux' && !vars.SELF_HOSTED }}
         uses: rickstaa/action-create-tag@v1

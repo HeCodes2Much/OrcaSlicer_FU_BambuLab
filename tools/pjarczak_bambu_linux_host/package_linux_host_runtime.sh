@@ -1,37 +1,37 @@
+\
 #!/usr/bin/env bash
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)"
-STANDALONE_CMAKE_DIR="$SCRIPT_DIR"
-BUILD_DIR="${1:-$SCRIPT_DIR/.build-linux-host}"
-BUILD_CONFIG="${BUILD_CONFIG:-Release}"
 RUNTIME_ROOT="$PROJECT_DIR/tools/pjarczak_bambu_linux_host/runtime/linux-x86_64"
 RUNTIME_LIB_DIR="$RUNTIME_ROOT/pjarczak_bambu_linux_host.runtime"
 
-purge_incompatible_cache() {
-    if [[ ! -f "$BUILD_DIR/CMakeCache.txt" ]]; then
-        return 0
-    fi
-
-    local cache_source=""
-    cache_source="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$BUILD_DIR/CMakeCache.txt" | head -n 1 || true)"
-    if [[ -n "$cache_source" && "$cache_source" != "$STANDALONE_CMAKE_DIR" ]]; then
-        rm -rf "$BUILD_DIR"
-    fi
-}
-
 find_host_bin() {
-    if [[ -d "$BUILD_DIR" ]]; then
-        find "$BUILD_DIR" -type f -name pjarczak_bambu_linux_host | head -n 1
+    if [[ $# -gt 0 && -n "${1:-}" ]]; then
+        if [[ -f "$1" ]]; then
+            printf '%s\n' "$1"
+            return 0
+        fi
+        if [[ -d "$1" ]]; then
+            find "$1" -type f -name pjarczak_bambu_linux_host | head -n 1
+            return 0
+        fi
     fi
-}
 
-configure_and_build() {
-    purge_incompatible_cache
-    mkdir -p "$BUILD_DIR"
-    cmake -S "$STANDALONE_CMAKE_DIR" -B "$BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE="$BUILD_CONFIG"
-    cmake --build "$BUILD_DIR" --target pjarczak_bambu_linux_host -j"${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}"
+    local candidate=""
+    for candidate in \
+        "$PROJECT_DIR/build/src/Release/pjarczak_bambu_linux_host" \
+        "$PROJECT_DIR/build/pjarczak_bambu_linux_host" \
+        "$PROJECT_DIR/build/src/pjarczak_bambu_linux_host"
+    do
+        if [[ -f "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    find "$PROJECT_DIR/build" -type f -name pjarczak_bambu_linux_host 2>/dev/null | head -n 1
 }
 
 copy_runtime_libs() {
@@ -45,8 +45,9 @@ copy_runtime_libs() {
         ' | sort -u
     )
 
+    local lib=""
+    local base=""
     for lib in "${libs[@]}"; do
-        local base
         base="$(basename -- "$lib")"
         case "$base" in
             ld-linux*|libc.so.*|libm.so.*|libpthread.so.*|librt.so.*|libdl.so.*|libresolv.so.*|libnsl.so.*|libutil.so.*|libgcc_s.so.*)
@@ -62,14 +63,11 @@ if [[ "$(uname -m)" != "x86_64" ]]; then
     exit 1
 fi
 
-HOST_BIN="$(find_host_bin || true)"
-if [[ -z "$HOST_BIN" ]]; then
-    configure_and_build
-    HOST_BIN="$(find_host_bin || true)"
-fi
-
+HOST_BIN="$(find_host_bin "${1:-}" || true)"
 if [[ -z "$HOST_BIN" || ! -f "$HOST_BIN" ]]; then
-    echo "failed to build/find pjarczak_bambu_linux_host in $BUILD_DIR" >&2
+    echo "failed to find built pjarczak_bambu_linux_host under $PROJECT_DIR/build" >&2
+    echo "build it first in the full Orca Linux build context, for example:" >&2
+    echo "  cmake --build build --config Release --target pjarczak_bambu_linux_host" >&2
     exit 1
 fi
 

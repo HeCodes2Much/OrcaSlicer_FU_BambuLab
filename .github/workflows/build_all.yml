@@ -1,3 +1,4 @@
+\
 name: Build all
 
 on:
@@ -14,6 +15,7 @@ on:
      - 'resources/**'
      - ".github/workflows/build_*.yml"
      - 'scripts/flatpak/**'
+     - 'tools/pjarczak_bambu_linux_host/**'
 
   pull_request:
     branches:
@@ -30,12 +32,12 @@ on:
      - 'build_release_vs2022.bat'
      - 'build_release_macos.sh'
      - 'scripts/flatpak/**'
-
+     - 'tools/pjarczak_bambu_linux_host/**'
 
   schedule:
-      - cron: '0 17 * * *' # run once a day at 1 AM Singapore time (UTC+8)
+      - cron: '0 17 * * *'
 
-  workflow_dispatch: # allows for manual dispatch
+  workflow_dispatch:
     inputs:
       build-deps-only:
         description: 'Only build dependencies (bypasses caching)'
@@ -45,37 +47,37 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
-  
 
 jobs:
   build_linux:
     strategy:
       fail-fast: false
-    # Don't run scheduled builds on forks:
     if: ${{ !cancelled() && (github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer') }}
     uses: ./.github/workflows/build_check_cache.yml
     with:
       os: ${{ vars.SELF_HOSTED && 'orca-lnx-server' || 'ubuntu-24.04' }}
       build-deps-only: ${{ inputs.build-deps-only || false }}
     secrets: inherit
+
   build_windows:
-    # Don't run scheduled builds on forks:
-    if: ${{ !cancelled() && (github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer') }}
+    needs: build_linux
+    if: ${{ !cancelled() && needs.build_linux.result == 'success' && (github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer') }}
     uses: ./.github/workflows/build_check_cache.yml
     with:
       os: ${{ vars.SELF_HOSTED && 'orca-win-server' || 'windows-latest' }}
       build-deps-only: ${{ inputs.build-deps-only || false }}
       force-build: ${{ github.event_name == 'schedule' }}
     secrets: inherit
+
   build_macos_arch:
+    needs: build_linux
     strategy:
       fail-fast: false
       matrix:
         arch:
           - arm64
           - x86_64
-    # Don't run scheduled builds on forks:
-    if: ${{ !cancelled() && (github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer') }}
+    if: ${{ !cancelled() && needs.build_linux.result == 'success' && (github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer') }}
     uses: ./.github/workflows/build_check_cache.yml
     with:
       os: ${{ vars.SELF_HOSTED && 'orca-macos-arm64' || 'macos-14' }}
@@ -83,6 +85,7 @@ jobs:
       build-deps-only: ${{ inputs.build-deps-only || false }}
       force-build: ${{ github.event_name == 'schedule' }}
     secrets: inherit
+
   build_macos_universal:
     name: Build macOS Universal
     needs: build_macos_arch
@@ -93,6 +96,7 @@ jobs:
       arch: universal
       macos-combine-only: true
     secrets: inherit
+
   unit_tests:
     name: Unit Tests
     runs-on: ${{ vars.SELF_HOSTED && 'orca-lnx-server' || 'ubuntu-24.04' }}
@@ -106,39 +110,47 @@ jobs:
             .github
             scripts
             tests
+
       - name: Apt-Install Dependencies
         if: ${{ !vars.SELF_HOSTED }}
         uses: ./.github/actions/apt-install-deps
+
       - name: Restore Test Artifact
         uses: actions/download-artifact@v8
         with:
           name: ${{ github.sha }}-tests
+
       - uses: lukka/get-cmake@latest
         with:
-          cmakeVersion: "~4.3.0"  # use most recent 4.3.x version
-          useLocalCache: true         # <--= Use the local cache (default is 'false').
+          cmakeVersion: "~4.3.0"
+          useLocalCache: true
           useCloudCache: true
+
       - name: Unpackage and Run Unit Tests
         timeout-minutes: 20
         run: |
           tar -xvf build_tests.tar
           scripts/run_unit_tests.sh
+
       - name: Upload Test Logs
         uses: actions/upload-artifact@v7
         if: ${{ failure() }}
         with:
           name: unit-test-logs
           path: build/tests/**/*.log
+
       - name: Publish Test Results
         if: always()
         uses: EnricoMi/publish-unit-test-result-action@v2
         with:
           files: "ctest_results.xml"
+
       - name: Delete Test Artifact
         if: success()
         uses: geekyeggo/delete-artifact@v5
         with:
           name: ${{ github.sha }}-tests
+
   flatpak:
     name: "Flatpak"
     container:
@@ -158,7 +170,6 @@ jobs:
             runner: ubuntu-24.04
           - arch: aarch64
             runner: ubuntu-24.04-arm
-    # Don't run scheduled builds on forks; skip entirely on self-hosted runners
     if: ${{ !cancelled() && !vars.SELF_HOSTED && (github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer') }}
     runs-on: ${{ matrix.variant.runner }}
     env:
@@ -185,7 +196,6 @@ jobs:
         echo "date=$(date +'%Y%m%d')" >> $GITHUB_ENV
         echo "git_commit_hash=$git_commit_hash" >> $GITHUB_ENV
       shell: bash
-    # Manage flatpak-builder cache externally so PRs restore but never upload
     - name: Restore flatpak-builder cache
       if: github.event_name == 'pull_request'
       uses: actions/cache/restore@v5
@@ -231,5 +241,4 @@ jobs:
         asset_path: /__w/OrcaSlicer/OrcaSlicer/OrcaSlicer-Linux-flatpak_${{ env.ver }}_${{ matrix.variant.arch }}.flatpak
         asset_name: OrcaSlicer-Linux-flatpak_nightly_${{ matrix.variant.arch }}.flatpak
         asset_content_type: application/octet-stream
-        max_releases: 1 # optional, if there are more releases than this matching the asset_name, the oldest ones are going to be deleted
-
+        max_releases: 1
