@@ -16,6 +16,7 @@ if (WIN32)
         ${CMAKE_CURRENT_LIST_DIR}/PJarczakLinuxSoBridgeLauncher_win.cpp
     )
     target_include_directories(pjarczak_bambu_networking_bridge PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../..)
+    target_compile_definitions(pjarczak_bambu_networking_bridge PRIVATE PJARCZAK_LINUX_BRIDGE_LIGHTWEIGHT_TASKS=1)
     target_link_libraries(pjarczak_bambu_networking_bridge PRIVATE boost_headeronly boost_libs OpenSSL::Crypto)
 elseif (APPLE)
     add_library(pjarczak_bambu_networking_bridge SHARED
@@ -23,6 +24,7 @@ elseif (APPLE)
         ${CMAKE_CURRENT_LIST_DIR}/PJarczakLinuxSoBridgeLauncher_mac.mm
     )
     target_include_directories(pjarczak_bambu_networking_bridge PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../..)
+    target_compile_definitions(pjarczak_bambu_networking_bridge PRIVATE PJARCZAK_LINUX_BRIDGE_LIGHTWEIGHT_TASKS=1)
     target_link_libraries(pjarczak_bambu_networking_bridge PRIVATE boost_headeronly boost_libs OpenSSL::Crypto)
 else()
     add_library(pjarczak_bambu_networking_bridge SHARED
@@ -54,7 +56,10 @@ if (UNIX AND NOT APPLE AND EXISTS "${PJARCZAK_LINUX_HOST_DIR}/main.cpp" AND EXIS
         ${PJARCZAK_REPO_ROOT}
         ${PJARCZAK_REPO_ROOT}/src
     )
-    target_compile_definitions(pjarczak_bambu_linux_host PRIVATE PJARCZAK_LINUX_BRIDGE_STANDALONE_HOST=1)
+    target_compile_definitions(pjarczak_bambu_linux_host PRIVATE
+        PJARCZAK_LINUX_BRIDGE_STANDALONE_HOST=1
+        PJARCZAK_LINUX_BRIDGE_LIGHTWEIGHT_TASKS=1
+    )
     find_package(nlohmann_json CONFIG QUIET)
     if (TARGET nlohmann_json::nlohmann_json)
         target_link_libraries(pjarczak_bambu_linux_host PRIVATE nlohmann_json::nlohmann_json)

@@ -4,7 +4,7 @@
 #include <string>
 #include <nlohmann/json.hpp>
 
-#if defined(PJARCZAK_LINUX_BRIDGE_STANDALONE_HOST) || !__has_include("../../../libslic3r/ProjectTask.hpp")
+#if defined(PJARCZAK_LINUX_BRIDGE_LIGHTWEIGHT_TASKS) || defined(PJARCZAK_LINUX_BRIDGE_STANDALONE_HOST) || !__has_include("../../../libslic3r/ProjectTask.hpp")
 namespace Slic3r {
 class BBLModelTask {
 public:
