@@ -8,6 +8,7 @@
 #include "MsgDialog.hpp"
 #include "DownloadProgressDialog.hpp"
 #include "slic3r/Utils/NetworkAgent.hpp"
+#include "slic3r/Utils/PJarczakLinuxBridge/PJarczakLinuxBridgeConfig.hpp"
 
 
 #include <boost/lexical_cast.hpp>
@@ -766,12 +767,16 @@ bool MediaPlayCtrl::start_stream_service(bool *need_install)
         boost::process::pipe intermediate;
         boost::filesystem::path start_dir(boost::filesystem::path(data_dir()) / "plugins");
 #ifdef __WXMSW__
-        auto plugins_dir = boost::nowide::widen(data_dir()) + L"\\plugins\\";
-        for (auto dll : {L"BambuSource.dll", L"live555.dll"}) {
-            auto file_dll  = tools_dir + dll;
-            auto file_dll2 = plugins_dir + dll;
-            if (!boost::filesystem::exists(file_dll) || boost::filesystem::last_write_time(file_dll) != boost::filesystem::last_write_time(file_dll2))
-                boost::filesystem::copy_file(file_dll2, file_dll, boost::filesystem::copy_options::overwrite_existing);
+        if (!Slic3r::PJarczakLinuxBridge::enabled()) {
+            auto plugins_dir = boost::nowide::widen(data_dir()) + L"\\plugins\\";
+            for (auto dll : {L"BambuSource.dll", L"live555.dll", L"agora_rtc_sdk.dll", L"libaosl.dll", L"libagora-ffmpeg.dll", L"libagora-soundtouch.dll"}) {
+                auto file_dll  = tools_dir + dll;
+                auto file_dll2 = plugins_dir + dll;
+                if (!boost::filesystem::exists(file_dll2))
+                    continue;
+                if (!boost::filesystem::exists(file_dll) || boost::filesystem::last_write_time(file_dll) != boost::filesystem::last_write_time(file_dll2))
+                    boost::filesystem::copy_file(file_dll2, file_dll, boost::filesystem::copy_options::overwrite_existing);
+            }
         }
         boost::process::child process_source(file_source, file_url2.ToStdWstring(), boost::process::start_dir(tools_dir), 
                                              boost::process::windows::create_no_window, 

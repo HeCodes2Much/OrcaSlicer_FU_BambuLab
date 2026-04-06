@@ -57,7 +57,7 @@ if "%VS_MAJOR%"=="16" (
     set CMAKE_GENERATOR="Visual Studio 18 2026"
 ) else (
     echo Error: Unsupported Visual Studio version: %VS_MAJOR%
-    echo Supported versions: VS2019 (16.x^), VS2022 (17.x^), VS2026 (18.x^)
+    echo Supported versions: VS2019 ^(16.x^), VS2022 ^(17.x^), VS2026 ^(18.x^)
     exit /b 1
 )
 
@@ -97,9 +97,6 @@ if "%debug%"=="ON" (
 )
 echo build type set to %build_type%
 
-call :resolve_wsl_rootfs
-if errorlevel 1 exit /b 1
-
 setlocal DISABLEDELAYEDEXPANSION
 cd deps
 mkdir %build_dir%
@@ -127,6 +124,9 @@ if "%USE_NINJA%"=="1" (
 if "%1"=="deps" goto :done
 
 :slicer
+call :check_linux_bridge_runtime_inputs
+if errorlevel 1 exit /b 1
+
 echo "building Orca Slicer..."
 cd %WP%
 mkdir %build_dir%
@@ -163,41 +163,40 @@ echo.
 echo Build completed in %_hours%h %_mins%m %_secs%s
 exit /b 0
 
-:resolve_wsl_rootfs
-set "ROOTFS_TAR_RESOLVED="
+:resolve_rootfs_tar
+if defined PJARCZAK_ROOTFS_TAR exit /b 0
+
 if defined PJARCZAK_WSL_ROOTFS_TAR (
     if exist "%PJARCZAK_WSL_ROOTFS_TAR%" (
-        set "ROOTFS_TAR_RESOLVED=%PJARCZAK_WSL_ROOTFS_TAR%"
-        goto :resolve_wsl_rootfs_done
+        set "PJARCZAK_ROOTFS_TAR=%PJARCZAK_WSL_ROOTFS_TAR%"
+        exit /b 0
     )
-    echo PJARCZAK_WSL_ROOTFS_TAR is set but file does not exist:
-    echo   %PJARCZAK_WSL_ROOTFS_TAR%
+    echo Missing file from PJARCZAK_WSL_ROOTFS_TAR: %PJARCZAK_WSL_ROOTFS_TAR%
     exit /b 1
 )
 
 if exist "%WP%\tools\pjarczak_bambu_runtime\rootfs\windows-wsl2-rootfs.tar" (
-    set "ROOTFS_TAR_RESOLVED=%WP%\tools\pjarczak_bambu_runtime\rootfs\windows-wsl2-rootfs.tar"
-    goto :resolve_wsl_rootfs_done
+    set "PJARCZAK_ROOTFS_TAR=%WP%\tools\pjarczak_bambu_runtime\rootfs\windows-wsl2-rootfs.tar"
+    exit /b 0
 )
 
 if exist "%WP%\tools\pjarczak_bambu_runtime\windows-wsl2-rootfs.tar" (
-    set "ROOTFS_TAR_RESOLVED=%WP%\tools\pjarczak_bambu_runtime\windows-wsl2-rootfs.tar"
-    goto :resolve_wsl_rootfs_done
+    set "PJARCZAK_ROOTFS_TAR=%WP%\tools\pjarczak_bambu_runtime\windows-wsl2-rootfs.tar"
+    exit /b 0
 )
 
-echo Missing windows-wsl2-rootfs.tar.
-echo Provide one of:
+echo Missing windows-wsl2-rootfs.tar
+echo Expected one of:
 echo   %WP%\tools\pjarczak_bambu_runtime\rootfs\windows-wsl2-rootfs.tar
 echo   %WP%\tools\pjarczak_bambu_runtime\windows-wsl2-rootfs.tar
-echo or set PJARCZAK_WSL_ROOTFS_TAR to a valid tar file path.
+echo Or set PJARCZAK_WSL_ROOTFS_TAR to an absolute path.
 exit /b 1
 
-:resolve_wsl_rootfs_done
-exit /b 0
-
-:copy_linux_bridge_runtime
-set "INSTALL_DIR=%WP%\%build_dir%\OrcaSlicer"
+:check_linux_bridge_runtime_inputs
 set "HOST_RUNTIME_DIR=%WP%\tools\pjarczak_bambu_linux_host\runtime\linux-x86_64"
+
+call :resolve_rootfs_tar
+if errorlevel 1 exit /b 1
 
 if not exist "%HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host" (
     echo Missing linux host runtime: %HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host
@@ -211,8 +210,29 @@ if not exist "%HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host.runtime" (
     exit /b 1
 )
 
-if not exist "%ROOTFS_TAR_RESOLVED%" (
-    echo Missing WSL rootfs tar: %ROOTFS_TAR_RESOLVED%
+echo Linux bridge preflight OK
+echo   host runtime: %HOST_RUNTIME_DIR%
+echo   rootfs tar:   %PJARCZAK_ROOTFS_TAR%
+exit /b 0
+
+:copy_linux_bridge_runtime
+set "INSTALL_DIR=%WP%\%build_dir%\OrcaSlicer"
+set "HOST_RUNTIME_DIR=%WP%\tools\pjarczak_bambu_linux_host\runtime\linux-x86_64"
+
+if not defined PJARCZAK_ROOTFS_TAR (
+    call :resolve_rootfs_tar
+    if errorlevel 1 exit /b 1
+)
+
+if not exist "%HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host" (
+    echo Missing linux host runtime: %HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host
+    echo Build it first on Linux with:
+    echo   tools\pjarczak_bambu_linux_host\package_linux_host_runtime.sh
+    exit /b 1
+)
+
+if not exist "%HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host.runtime" (
+    echo Missing linux host runtime directory: %HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host.runtime
     exit /b 1
 )
 
@@ -244,19 +264,19 @@ if errorlevel 1 (
     exit /b 1
 )
 
-copy /Y "%ROOTFS_TAR_RESOLVED%" "%INSTALL_DIR%\windows-wsl2-rootfs.tar" >nul
-if errorlevel 1 (
-    echo Failed to copy WSL rootfs tar into %INSTALL_DIR%
-    exit /b 1
-)
-
 if exist "%INSTALL_DIR%\pjarczak_bambu_linux_host.runtime" (
     rmdir /S /Q "%INSTALL_DIR%\pjarczak_bambu_linux_host.runtime"
 )
 
-xcopy "%HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host.runtime" "%INSTALL_DIR%\pjarczak_bambu_linux_host.runtime\\" /E /I /Y >nul
+xcopy "%HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host.runtime" "%INSTALL_DIR%\pjarczak_bambu_linux_host.runtime\" /E /I /Y >nul
 if errorlevel 4 (
     echo Failed to copy linux host runtime directory into %INSTALL_DIR%
+    exit /b 1
+)
+
+copy /Y "%PJARCZAK_ROOTFS_TAR%" "%INSTALL_DIR%\windows-wsl2-rootfs.tar" >nul
+if errorlevel 1 (
+    echo Failed to copy windows-wsl2-rootfs.tar into %INSTALL_DIR%
     exit /b 1
 )
 

@@ -176,9 +176,77 @@ std::string linux_live555_library_name()
     return "liblive555.so";
 }
 
+std::string host_executable_file_name()
+{
+    return "pjarczak_bambu_linux_host";
+}
+
+std::string mac_host_wrapper_file_name()
+{
+    return "pjarczak-bambu-linux-host-wrapper";
+}
+
+std::string windows_wsl_distro_file_name()
+{
+    return "pjarczak_wsl_distro.txt";
+}
+
+std::string windows_wsl_import_script_file_name()
+{
+    return "install_runtime.ps1";
+}
+
+std::string windows_wsl_import_cmd_file_name()
+{
+    return "install_runtime.cmd";
+}
+
+std::string windows_wsl_validate_script_file_name()
+{
+    return "verify_runtime.ps1";
+}
+
+std::string windows_wsl_bootstrap_script_file_name()
+{
+    return "pjarczak_wsl_run_host.sh";
+}
+
+std::string windows_wsl_rootfs_file_name()
+{
+    return "windows-wsl2-rootfs.tar";
+}
+
+bool is_overlay_runtime_filename(const std::string& file_name)
+{
+    if (file_name == "network_plugins.json")
+        return true;
+
+    if (file_name.size() >= 3 && file_name.compare(file_name.size() - 3, 3, ".so") == 0)
+        return true;
+
+    if (file_name.find(".so.") != std::string::npos)
+        return true;
+
+    return file_name == linux_payload_manifest_file_name() ||
+           file_name == bridge_network_current_dir_name() ||
+           file_name == host_executable_file_name() ||
+           file_name == mac_host_wrapper_file_name() ||
+           file_name == windows_wsl_distro_file_name() ||
+           file_name == windows_wsl_import_script_file_name() ||
+           file_name == windows_wsl_import_cmd_file_name() ||
+           file_name == windows_wsl_validate_script_file_name() ||
+           file_name == windows_wsl_bootstrap_script_file_name() ||
+           file_name == windows_wsl_rootfs_file_name() ||
+           is_linux_payload_filename(file_name);
+}
+
 bool is_linux_payload_filename(const std::string& file_name)
 {
-    return file_name == linux_network_library_name() || file_name == linux_source_library_name() || file_name == linux_live555_library_name();
+    if (file_name.size() >= 3 && file_name.compare(file_name.size() - 3, 3, ".so") == 0)
+        return true;
+    if (file_name.find(".so.") != std::string::npos)
+        return true;
+    return false;
 }
 
 bool validate_linux_so_binary(const std::string& file_path, std::string* reason)
@@ -332,22 +400,28 @@ bool validate_linux_payload_set_against_manifest(const boost::filesystem::path& 
         set_reason(reason, "manifest missing");
         return false;
     }
-    for (const auto& name : {linux_network_library_name(), linux_source_library_name()}) {
-        const auto path = (plugin_folder / name).string();
+
+    bool found_any = false;
+    for (boost::filesystem::directory_iterator it(plugin_folder); it != boost::filesystem::directory_iterator(); ++it) {
+        if (!boost::filesystem::is_regular_file(it->status()))
+            continue;
+        const std::string file_name = it->path().filename().string();
+        if (!is_linux_payload_filename(file_name))
+            continue;
+
+        found_any = true;
         std::string local_reason;
-        if (!validate_linux_payload_file_against_manifest(path, manifest, &local_reason)) {
-            set_reason(reason, name + ": " + local_reason);
+        if (!validate_linux_payload_file_against_manifest(it->path().string(), manifest, &local_reason)) {
+            set_reason(reason, file_name + ": " + local_reason);
             return false;
         }
     }
-    const auto live555 = (plugin_folder / linux_live555_library_name());
-    if (boost::filesystem::exists(live555)) {
-        std::string local_reason;
-        if (!validate_linux_payload_file_against_manifest(live555.string(), manifest, &local_reason)) {
-            set_reason(reason, linux_live555_library_name() + ": " + local_reason);
-            return false;
-        }
+
+    if (!found_any) {
+        set_reason(reason, "no linux payload files found");
+        return false;
     }
+
     set_reason(reason, "ok");
     return true;
 }
@@ -373,7 +447,7 @@ bool validate_linux_payload_file(const std::string& file_path, std::string* reas
 
 std::vector<std::string> ota_copy_extensions()
 {
-    return {".so", ".json"};
+    return {".so", ".json", ".dll", ".dylib", ".ps1", ".cmd", ".txt", ".sh", ".tar"};
 }
 
 } // namespace Slic3r::PJarczakLinuxBridge

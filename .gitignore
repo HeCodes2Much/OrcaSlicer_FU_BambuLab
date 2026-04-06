@@ -26,7 +26,6 @@ deps/build*/*
 install_*
 !tools/pjarczak_bambu_runtime/wsl/install_runtime.ps1
 !tools/pjarczak_bambu_runtime/wsl/install_runtime.cmd
-tools/pjarczak_bambu_runtime/rootfs/windows-wsl2-rootfs.tar
 build_*/
 SVG
 src/OrcaSlicer-doc/
