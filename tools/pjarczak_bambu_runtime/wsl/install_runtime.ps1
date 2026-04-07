@@ -118,7 +118,9 @@ if (-not $SkipCopyToPluginDir) {
         'linux_payload_manifest.json',
         'libbambu_networking.so',
         'libBambuSource.so',
-        'liblive555.so'
+        'liblive555.so',
+        'libagora_rtc_sdk.so',
+        'libagora-fdkaac.so'
     )
 
     foreach ($name in $fileNames) {

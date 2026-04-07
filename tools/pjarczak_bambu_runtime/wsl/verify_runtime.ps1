@@ -35,13 +35,13 @@ function To-WslPath([string]$Path) {
     $full = [System.IO.Path]::GetFullPath($Path)
     if ($full.Length -ge 2 -and $full[1] -eq ':') {
         $drive = $full.Substring(0, 1).ToLowerInvariant()
-        $tail = $full.Substring(2).Replace('\\', '/')
+        $tail = ($full.Substring(2) -replace '\\', '/')
         if ($tail.StartsWith('/')) {
             $tail = $tail.Substring(1)
         }
         return "/mnt/$drive/$tail"
     }
-    return $full.Replace('\\', '/')
+    return ($full -replace '\\', '/')
 }
 
 if ([string]::IsNullOrWhiteSpace($PackageDir)) {
