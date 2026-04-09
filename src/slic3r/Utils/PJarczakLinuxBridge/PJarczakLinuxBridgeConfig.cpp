@@ -1,16 +1,16 @@
 #include "PJarczakLinuxBridgeConfig.hpp"
-#include "../bambu_networking.hpp"
 
 #include <array>
 #include <cstdint>
-#include <cctype>
 #include <fstream>
 #include <sstream>
 #include <iomanip>
 #include <cstdlib>
+#include <cctype>
+#include <boost/filesystem/operations.hpp>
 #include <openssl/sha.h>
 #include <nlohmann/json.hpp>
-#include <boost/dll/runtime_symbol_info.hpp>
+#include "../bambu_networking.hpp"
 
 namespace Slic3r::PJarczakLinuxBridge {
 
@@ -40,7 +40,7 @@ bool expected_machine_matches(std::uint16_t machine)
 {
 #if defined(__x86_64__) || defined(_M_X64)
     return machine == EM_X86_64;
-#elif defined(__aarch64__) || defined(_M_ARM64)
+#elif defined(__aarch64__)
     return machine == EM_AARCH64;
 #else
     (void)machine;
@@ -61,25 +61,27 @@ std::string env_or(const char* name, const char* fallback)
     return fallback;
 }
 
-bool env_flag_enabled(const char* name)
+bool env_flag(const char* name, bool& value)
 {
-    const char* v = std::getenv(name);
-    if (!v || !*v)
+    const char* raw = std::getenv(name);
+    if (!raw || !*raw)
         return false;
-    std::string s(v);
-    for (char& ch : s)
+
+    std::string v(raw);
+    for (char& ch : v)
         ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-    return s == "1" || s == "true" || s == "yes" || s == "on";
+
+    if (v == "1" || v == "true" || v == "yes" || v == "on") {
+        value = true;
+        return true;
+    }
+    if (v == "0" || v == "false" || v == "no" || v == "off") {
+        value = false;
+        return true;
+    }
+    return false;
 }
 
-boost::filesystem::path process_dir_path()
-{
-    try {
-        return boost::dll::program_location().parent_path();
-    } catch (...) {
-        return boost::filesystem::current_path();
-    }
-}
 
 const nlohmann::json* find_manifest_entry(const nlohmann::json& root, const std::string& file_name)
 {
@@ -95,14 +97,25 @@ const nlohmann::json* find_manifest_entry(const nlohmann::json& root, const std:
     return nullptr;
 }
 
-} // namespace
+}
 
 bool enabled()
 {
-    if (env_flag_enabled("PJARCZAK_DISABLE_LINUX_BRIDGE"))
-        return false;
-    if (env_flag_enabled("PJARCZAK_FORCE_LINUX_BRIDGE"))
-        return true;
+    bool forced = false;
+    if (env_flag("PJARCZAK_LINUX_BRIDGE_ENABLED", forced))
+        return forced;
+
+#if defined(_MSC_VER) || defined(_WIN32)
+    return true;
+#elif defined(__WXMAC__) || defined(__APPLE__)
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool use_bridge_network_module()
+{
 #if defined(_MSC_VER) || defined(_WIN32)
     return true;
 #elif defined(__WXMAC__) || defined(__APPLE__)
@@ -114,12 +127,12 @@ bool enabled()
 
 bool source_module_is_network_module()
 {
-    return enabled();
+    return use_bridge_network_module();
 }
 
 bool should_force_linux_plugin_payload(const std::string& plugin_name)
 {
-    return enabled() && plugin_name == "plugins";
+    return enabled() && use_bridge_network_module() && plugin_name == "plugins";
 }
 
 const char* forced_download_os_type()
@@ -139,26 +152,19 @@ std::string bridge_network_current_dir_name()
 #elif defined(__WXMAC__) || defined(__APPLE__)
     return "lib" + bridge_network_module_stem() + ".dylib";
 #else
-    return "lib" + bridge_network_module_stem() + ".so";
+    return linux_network_library_name();
 #endif
-}
-
-std::string current_process_dir()
-{
-    return process_dir_path().string();
-}
-
-std::string sibling_binary_path(const std::string& file_name)
-{
-    return (process_dir_path() / file_name).string();
 }
 
 std::string bridge_network_library_path(const boost::filesystem::path& plugin_folder)
 {
-    const auto preferred = (plugin_folder / bridge_network_current_dir_name());
-    if (boost::filesystem::exists(preferred))
-        return preferred.string();
-    return sibling_binary_path(bridge_network_current_dir_name());
+#if defined(_MSC_VER) || defined(_WIN32)
+    return (plugin_folder / (bridge_network_module_stem() + ".dll")).string();
+#elif defined(__WXMAC__) || defined(__APPLE__)
+    return (plugin_folder / ("lib" + bridge_network_module_stem() + ".dylib")).string();
+#else
+    return (plugin_folder / linux_network_library_name()).string();
+#endif
 }
 
 std::string linux_network_library_name()
@@ -171,28 +177,67 @@ std::string linux_source_library_name()
     return "libBambuSource.so";
 }
 
-std::string linux_live555_library_name()
+std::string host_executable_file_name()
 {
-    return "liblive555.so";
+    return "pjarczak_bambu_linux_host";
 }
 
-std::string linux_agora_rtc_sdk_library_name()
+std::string mac_host_wrapper_file_name()
 {
-    return "libagora_rtc_sdk.so";
+    return "pjarczak-bambu-linux-host-wrapper";
 }
 
-std::string linux_agora_fdkaac_library_name()
+std::string windows_wsl_distro_file_name()
 {
-    return "libagora-fdkaac.so";
+    return "pjarczak_wsl_distro.txt";
+}
+
+std::string windows_wsl_import_script_file_name()
+{
+    return "pjarczak-import-wsl-runtime.ps1";
+}
+
+std::string windows_wsl_validate_script_file_name()
+{
+    return "pjarczak-validate-wsl-runtime.ps1";
+}
+
+std::string windows_wsl_bootstrap_script_file_name()
+{
+    return "pjarczak-wsl-run-host.sh";
+}
+
+std::string windows_wsl_rootfs_file_name()
+{
+    return "windows-wsl2-rootfs.tar";
 }
 
 bool is_linux_payload_filename(const std::string& file_name)
 {
-    return file_name == linux_network_library_name() ||
-           file_name == linux_source_library_name() ||
-           file_name == linux_live555_library_name() ||
-           file_name == linux_agora_rtc_sdk_library_name() ||
-           file_name == linux_agora_fdkaac_library_name();
+    return file_name == linux_network_library_name() || file_name == linux_source_library_name();
+}
+
+bool is_overlay_runtime_filename(const std::string& file_name)
+{
+    if (file_name == "network_plugins.json")
+        return true;
+
+    if (file_name.size() >= 3 && file_name.compare(file_name.size() - 3, 3, ".so") == 0)
+        return true;
+
+    if (file_name.find(".so.") != std::string::npos)
+        return true;
+
+    return file_name == linux_payload_manifest_file_name() ||
+           file_name == bridge_network_current_dir_name() ||
+           file_name == host_executable_file_name() ||
+           file_name == mac_host_wrapper_file_name() ||
+           file_name == windows_wsl_distro_file_name() ||
+           file_name == windows_wsl_import_script_file_name() ||
+           file_name == windows_wsl_validate_script_file_name() ||
+           file_name == windows_wsl_bootstrap_script_file_name() ||
+           file_name == windows_wsl_rootfs_file_name() ||
+           is_linux_payload_filename(file_name);
 }
 
 bool validate_linux_so_binary(const std::string& file_path, std::string* reason)
@@ -334,9 +379,12 @@ bool validate_linux_payload_file_against_manifest(const std::string& file_path, 
     }
     if (p.filename().string() == linux_network_library_name()) {
         const auto manifest_abi = entry->value("abi_version", std::string());
-        if (!manifest_abi.empty() && manifest_abi != expected_network_abi_version()) {
-            set_reason(reason, "manifest abi_version does not match configured expected ABI version");
-            return false;
+        if (!manifest_abi.empty()) {
+            std::string abi_reason;
+            if (!abi_version_matches_expected(manifest_abi, &abi_reason)) {
+                set_reason(reason, "manifest abi_version does not match configured expected ABI version: " + abi_reason);
+                return false;
+            }
         }
     }
     set_reason(reason, "ok");
@@ -355,16 +403,6 @@ bool validate_linux_payload_set_against_manifest(const boost::filesystem::path& 
         std::string local_reason;
         if (!validate_linux_payload_file_against_manifest(path, manifest, &local_reason)) {
             set_reason(reason, name + ": " + local_reason);
-            return false;
-        }
-    }
-    for (const auto& optional_name : {linux_live555_library_name(), linux_agora_rtc_sdk_library_name(), linux_agora_fdkaac_library_name()}) {
-        const auto optional_file = (plugin_folder / optional_name);
-        if (!boost::filesystem::exists(optional_file))
-            continue;
-        std::string local_reason;
-        if (!validate_linux_payload_file_against_manifest(optional_file.string(), manifest, &local_reason)) {
-            set_reason(reason, optional_name + ": " + local_reason);
             return false;
         }
     }
@@ -393,7 +431,7 @@ bool validate_linux_payload_file(const std::string& file_path, std::string* reas
 
 std::vector<std::string> ota_copy_extensions()
 {
-    return {".so", ".json"};
+    return {".so", ".json", ".dll", ".dylib", ".ps1", ".txt", ".sh", ".tar"};
 }
 
-} // namespace Slic3r::PJarczakLinuxBridge
+}

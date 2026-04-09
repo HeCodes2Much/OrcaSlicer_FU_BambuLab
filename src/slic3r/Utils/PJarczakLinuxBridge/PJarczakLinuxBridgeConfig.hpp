@@ -7,23 +7,27 @@
 namespace Slic3r::PJarczakLinuxBridge {
 
 bool enabled();
+bool use_bridge_network_module();
 bool source_module_is_network_module();
 bool should_force_linux_plugin_payload(const std::string& plugin_name);
 const char* forced_download_os_type();
 
 std::string bridge_network_module_stem();
 std::string bridge_network_current_dir_name();
-std::string current_process_dir();
-std::string sibling_binary_path(const std::string& file_name);
 std::string bridge_network_library_path(const boost::filesystem::path& plugin_folder);
 
 std::string linux_network_library_name();
 std::string linux_source_library_name();
-std::string linux_live555_library_name();
-std::string linux_agora_rtc_sdk_library_name();
-std::string linux_agora_fdkaac_library_name();
+std::string host_executable_file_name();
+std::string mac_host_wrapper_file_name();
+std::string windows_wsl_distro_file_name();
+std::string windows_wsl_import_script_file_name();
+std::string windows_wsl_validate_script_file_name();
+std::string windows_wsl_bootstrap_script_file_name();
+std::string windows_wsl_rootfs_file_name();
 
 bool is_linux_payload_filename(const std::string& file_name);
+bool is_overlay_runtime_filename(const std::string& file_name);
 bool validate_linux_so_binary(const std::string& file_path, std::string* reason = nullptr);
 std::string linux_payload_manifest_file_name();
 std::string linux_payload_manifest_path(const boost::filesystem::path& plugin_folder);

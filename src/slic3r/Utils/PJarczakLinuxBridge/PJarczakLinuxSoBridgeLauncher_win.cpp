@@ -1,4 +1,5 @@
 #include "PJarczakLinuxSoBridgeLauncher.hpp"
+#include "PJarczakLinuxBridgeConfig.hpp"
 
 #include <windows.h>
 
@@ -96,10 +97,7 @@ std::string configured_distro_name(const std::filesystem::path& plugin_dir)
     const auto env_value = required_env("PJARCZAK_WSL_DISTRO");
     if (!env_value.empty())
         return env_value;
-    const auto file_value = read_text_file_trimmed(plugin_dir / "pjarczak_wsl_distro.txt");
-    if (!file_value.empty())
-        return file_value;
-    return "PJARCZAK-BAMBU";
+    return read_text_file_trimmed(plugin_dir / windows_wsl_distro_file_name());
 }
 
 std::filesystem::path configured_plugin_cache_dir()
@@ -110,7 +108,7 @@ std::filesystem::path configured_plugin_cache_dir()
 
     const auto appdata = required_env("APPDATA");
     if (!appdata.empty())
-        return std::filesystem::path(appdata) / "OrcaSlicer" / "plugins";
+        return std::filesystem::path(appdata) / "BambuStudio" / "plugins";
 
     return {};
 }
@@ -125,24 +123,24 @@ std::string wsl_exe_path()
     return narrow((std::filesystem::path(path) / L"wsl.exe").wstring());
 }
 
-std::string shell_quote(const std::string& value)
+std::string first_missing_runtime_file(const std::filesystem::path& plugin_dir)
 {
-    std::string out = "'";
-    for (char ch : value) {
-        if (ch == '\'')
-            out += "'\\''";
-        else
-            out += ch;
+    for (const auto& name : {
+            host_executable_file_name(),
+            windows_wsl_bootstrap_script_file_name(),
+            windows_wsl_distro_file_name()
+        }) {
+        if (!std::filesystem::exists(plugin_dir / name))
+            return name;
     }
-    out += "'";
-    return out;
+    return {};
 }
 
 }
 
 std::string host_executable_name()
 {
-    return "pjarczak_bambu_linux_host";
+    return host_executable_file_name();
 }
 
 std::string host_pipe_hint()
@@ -150,27 +148,42 @@ std::string host_pipe_hint()
     return "stdio";
 }
 
+std::string launch_preflight_error()
+{
+    const std::filesystem::path plugin_dir = module_dir();
+    if (plugin_dir.empty())
+        return "bridge launcher could not resolve plugin directory";
+
+    if (!std::filesystem::exists(wsl_exe_path()))
+        return "wsl.exe not found in Windows system directory";
+
+    const auto missing_file = first_missing_runtime_file(plugin_dir);
+    if (!missing_file.empty())
+        return "required Windows WSL runtime file missing: " + missing_file;
+
+    const auto distro = configured_distro_name(plugin_dir);
+    if (distro.empty())
+        return "PJARCZAK_WSL_DISTRO is not set and pjarczak_wsl_distro.txt is missing or empty";
+
+    return {};
+}
+
 LaunchSpec build_default_launch_spec()
 {
     const std::filesystem::path plugin_dir = module_dir();
     const std::string distro = configured_distro_name(plugin_dir);
+
+    if (distro.empty()) {
+        LaunchSpec spec;
+        spec.description = "windows via WSL2 - missing distro configuration";
+        spec.argv = {"cmd.exe", "/C", "echo PJARCZAK_WSL_DISTRO is not set and pjarczak_wsl_distro.txt is missing or empty 1>&2 && exit /b 127"};
+        return spec;
+    }
+
     const auto plugin_cache_dir = configured_plugin_cache_dir();
     const std::string plugin_dir_wsl = to_wsl_path(plugin_dir);
     const std::string plugin_cache_wsl = plugin_cache_dir.empty() ? std::string() : to_wsl_path(plugin_cache_dir);
-    const std::string bootstrap_wsl = to_wsl_path(plugin_dir / "pjarczak_wsl_run_host.sh");
-
-    if (const char* cmd = std::getenv("PJARCZAK_LINUX_HOST_CMD"); cmd && *cmd) {
-        LaunchSpec spec;
-        spec.description = "windows via PJARCZAK_LINUX_HOST_CMD";
-        spec.argv = {
-            wsl_exe_path(),
-            "-d", distro,
-            "--user", "root",
-            "--cd", "/",
-            "sh", "-lc", cmd
-        };
-        return spec;
-    }
+    const std::string bootstrap_wsl = to_wsl_path(plugin_dir / windows_wsl_bootstrap_script_file_name());
 
     LaunchSpec spec;
     spec.description = "windows via explicit WSL2 distro with linux-local runtime bootstrap";

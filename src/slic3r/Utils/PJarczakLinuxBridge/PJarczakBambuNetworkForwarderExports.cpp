@@ -1,6 +1,5 @@
 #include "PJarczakBambuNetworkForwarderState.hpp"
 #include "PJarczakLinuxBridgeCompat.hpp"
-#include "PJarczakLinuxBridgeConfig.hpp"
 #include "PJarczakLinuxSoBridgeEventPump.hpp"
 #include "PJarczakLinuxSoBridgeRpcClient.hpp"
 #include "../../../../shared/pjarczak_linux_plugin_bridge_core/BridgeCoreJson.hpp"
@@ -15,6 +14,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wreturn-type-c-linkage"
@@ -29,6 +29,17 @@
 namespace Slic3r::PJarczakLinuxBridge {
 
 static std::string g_last_error;
+static std::string bridge_reported_version()
+{
+    const auto j = RpcClient::instance().invoke_json("bridge.handshake", nlohmann::json::object());
+    const auto actual = j.value("network_actual_abi_version", std::string());
+    if (!actual.empty())
+        return actual;
+    const auto reported = j.value("network_abi_version", std::string());
+    if (!reported.empty())
+        return reported;
+    return expected_network_abi_version();
+}
 
 static int invalid_handle()
 {
@@ -115,7 +126,7 @@ static void start_cancel_watch(const std::shared_ptr<BridgeJobState>& job)
     });
 }
 
-static int invoke_job_update_only(const char* method, const char* kind, BridgeAgent* a, const nlohmann::json& payload, OnUpdateStatusFn update)
+static int invoke_job_update_only(const char* method, const char* kind, BridgeAgent* a, const nlohmann::json& payload, BBL::OnUpdateStatusFn update)
 {
     if (!a)
         return invalid_handle();
@@ -129,7 +140,7 @@ static int invoke_job_update_only(const char* method, const char* kind, BridgeAg
     return j.value("value", j.value("ret", 0));
 }
 
-static int invoke_job_with_wait(const char* method, const char* kind, BridgeAgent* a, const nlohmann::json& params, OnUpdateStatusFn update, WasCancelledFn cancel, OnWaitFn wait, std::string* out)
+static int invoke_job_with_wait(const char* method, const char* kind, BridgeAgent* a, const nlohmann::json& params, BBL::OnUpdateStatusFn update, BBL::WasCancelledFn cancel, BBL::OnWaitFn wait, std::string* out)
 {
     if (!a)
         return invalid_handle();
@@ -199,7 +210,7 @@ static void json_to_nested_string_map(const nlohmann::json& j, std::map<std::str
     }
 }
 
-static int invoke_progress_job(const char* method, const char* kind, BridgeAgent* a, const nlohmann::json& payload, ProgressFn progress, WasCancelledFn cancel)
+static int invoke_progress_job(const char* method, const char* kind, BridgeAgent* a, const nlohmann::json& payload, BBL::ProgressFn progress, BBL::WasCancelledFn cancel)
 {
     if (!a)
         return invalid_handle();
@@ -215,7 +226,7 @@ static int invoke_progress_job(const char* method, const char* kind, BridgeAgent
     return j.value("value", j.value("ret", 0));
 }
 
-static int invoke_progress_check_job(const char* method, const char* kind, BridgeAgent* a, const nlohmann::json& payload, CheckFn check, ProgressFn progress, WasCancelledFn cancel)
+static int invoke_progress_check_job(const char* method, const char* kind, BridgeAgent* a, const nlohmann::json& payload, BBL::CheckFn check, BBL::ProgressFn progress, BBL::WasCancelledFn cancel)
 {
     if (!a)
         return invalid_handle();
@@ -240,14 +251,7 @@ using Slic3r::BBLModelTask;
 using Slic3r::OnGetSubTaskFn;
 
 PJBRIDGE_EXPORT bool bambu_network_check_debug_consistent(bool) { return true; }
-PJBRIDGE_EXPORT std::string bambu_network_get_version()
-{
-    const auto j = ok_or_error(RpcClient::instance().invoke_json("net.get_version", nlohmann::json::object()));
-    const auto value = j.value("value", std::string());
-    if (!value.empty())
-        return value;
-    return expected_network_abi_version();
-}
+PJBRIDGE_EXPORT std::string bambu_network_get_version() { return bridge_reported_version(); }
 
 PJBRIDGE_EXPORT void* bambu_network_create_agent(std::string log_dir)
 {
@@ -458,12 +462,18 @@ PJBRIDGE_EXPORT const char* bambu_network_get_last_error_msg() { return g_last_e
 PJBRIDGE_EXPORT int Bambu_Create(Bambu_Tunnel* tunnel, char const* path)
 {
     if (!tunnel) return -1;
-    auto* t = new BridgeTunnel();
     const auto j = ok_or_error(RpcClient::instance().invoke_json("src.create", {{"path", std::string(path ? path : "")}}));
-    t->remote_handle = j.value("tunnel", 0LL);
+    const int ret = j.value("value", -1);
+    const auto remote = j.value("tunnel", 0LL);
+    if (ret != 0 || remote == 0) {
+        *tunnel = nullptr;
+        return ret;
+    }
+    auto* t = new BridgeTunnel();
+    t->remote_handle = remote;
     register_remote_tunnel(t);
     *tunnel = reinterpret_cast<Bambu_Tunnel>(t);
-    return j.value("value", -1);
+    return ret;
 }
 
 PJBRIDGE_EXPORT void Bambu_SetLogger(Bambu_Tunnel tunnel, Logger logger, void* context)
@@ -489,15 +499,15 @@ PJBRIDGE_EXPORT int Bambu_ReadSample(Bambu_Tunnel tunnel, Bambu_Sample* sample)
     if (!t || !sample)
         return -1;
 
-    const auto j = ok_or_error(RpcClient::instance().invoke_json("src.read_sample", {{"tunnel", t->remote_handle}}));
+    const auto reply = RpcClient::instance().invoke_binary("src.read_sample", {{"tunnel", t->remote_handle}});
+    const auto j = ok_or_error(reply.payload);
     const int ret = j.value("value", -1);
     if (ret != 0 || !j.contains("sample"))
         return ret;
 
     const auto& s = j["sample"];
     CachedSample cached;
-    const auto buf = s.value("buffer", std::string());
-    cached.buffer.assign(buf.begin(), buf.end());
+    cached.buffer = reply.binary;
     cached.itrack = s.value("itrack", 0);
     cached.size = s.value("size", 0);
     cached.flags = s.value("flags", 0);
@@ -509,18 +519,57 @@ PJBRIDGE_EXPORT int Bambu_ReadSample(Bambu_Tunnel tunnel, Bambu_Sample* sample)
     sample->size = front.size;
     sample->flags = front.flags;
     sample->decode_time = front.decode_time;
-    sample->buffer = front.buffer.data();
+    sample->buffer = front.buffer.empty() ? nullptr : front.buffer.data();
     return ret;
 }
 
 PJBRIDGE_EXPORT int Bambu_SendMessage(Bambu_Tunnel tunnel, int ctrl, char const* data, int len)
 {
     auto* t = require_tunnel(tunnel);
-    if (!t) return -1;
-    return RpcClient::instance().invoke_int("src.send_message", {{"tunnel", t->remote_handle}, {"ctrl", ctrl}, {"data", std::string(data ? data : "", data ? len : 0)}});
+    if (!t)
+        return -1;
+
+    std::vector<unsigned char> binary;
+    if (data && len > 0)
+        binary.assign(reinterpret_cast<const unsigned char*>(data), reinterpret_cast<const unsigned char*>(data) + static_cast<std::size_t>(len));
+
+    const auto reply = RpcClient::instance().invoke_binary("src.send_message", {{"tunnel", t->remote_handle}, {"ctrl", ctrl}}, binary);
+    return reply.payload.value("value", -1);
 }
 
-PJBRIDGE_EXPORT int Bambu_RecvMessage(Bambu_Tunnel tunnel, int* ctrl, char* data, int* len) { auto* t = require_tunnel(tunnel); if (!t || !len) return -1; const auto j = ok_or_error(RpcClient::instance().invoke_json("src.recv_message", {{"tunnel", t->remote_handle}})); const int ret = j.value("value", -1); if (ret != 0) return ret; t->recv_message_buffer = j.value("data", std::string()); if (ctrl) *ctrl = j.value("ctrl", 0); const int needed = static_cast<int>(t->recv_message_buffer.size()); if (!data || *len < needed) { *len = needed; return -1; } std::memcpy(data, t->recv_message_buffer.data(), static_cast<size_t>(needed)); *len = needed; return ret; }
+PJBRIDGE_EXPORT int Bambu_RecvMessage(Bambu_Tunnel tunnel, int* ctrl, char* data, int* len)
+{
+    auto* t = require_tunnel(tunnel);
+    if (!t || !len)
+        return -1;
+
+    const int caller_buffer_size = *len;
+    const auto reply = RpcClient::instance().invoke_binary("src.recv_message", {{"tunnel", t->remote_handle}, {"buffer_size", caller_buffer_size}});
+    const auto j = ok_or_error(reply.payload);
+    const int ret = j.value("value", -1);
+    if (ctrl)
+        *ctrl = j.value("ctrl", 0);
+
+    if (ret != 0) {
+        if (j.contains("required_len"))
+            *len = j.value("required_len", caller_buffer_size);
+        return ret;
+    }
+
+    t->recv_message_buffer.assign(reply.binary.begin(), reply.binary.end());
+    const int needed = j.contains("message_len") ? j.value("message_len", static_cast<int>(t->recv_message_buffer.size()))
+                                                  : static_cast<int>(t->recv_message_buffer.size());
+    if (!data || caller_buffer_size < needed) {
+        *len = needed;
+        return -1;
+    }
+
+    if (needed > 0)
+        std::memcpy(data, t->recv_message_buffer.data(), static_cast<std::size_t>(needed));
+    *len = needed;
+    return ret;
+}
+
 PJBRIDGE_EXPORT void Bambu_Close(Bambu_Tunnel tunnel) { auto* t = require_tunnel(tunnel); if (t) RpcClient::instance().invoke_void("src.close", {{"tunnel", t->remote_handle}}); }
 PJBRIDGE_EXPORT void Bambu_Destroy(Bambu_Tunnel tunnel) { auto* t = require_tunnel(tunnel); if (!t) return; unregister_remote_tunnel(t); RpcClient::instance().invoke_void("src.destroy", {{"tunnel", t->remote_handle}}); delete t; }
 PJBRIDGE_EXPORT int Bambu_Init() { return RpcClient::instance().invoke_int("src.init"); }

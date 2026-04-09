@@ -1,15 +1,23 @@
 #pragma once
 
-#include <nlohmann/json.hpp>
-#include <boost/process.hpp>
 #include <condition_variable>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
+#include <atomic>
+
+#include <boost/process.hpp>
+#include <nlohmann/json.hpp>
 
 namespace Slic3r::PJarczakLinuxBridge {
+
+struct RpcBinaryReply {
+    nlohmann::json payload;
+    std::vector<unsigned char> binary;
+};
 
 class RpcClient {
 public:
@@ -21,6 +29,7 @@ public:
     bool invoke_bool(const std::string& method, const nlohmann::json& payload = {});
     std::string invoke_string(const std::string& method, const nlohmann::json& payload = {});
     nlohmann::json invoke_json(const std::string& method, const nlohmann::json& payload = {});
+    RpcBinaryReply invoke_binary(const std::string& method, const nlohmann::json& payload = {}, const std::vector<unsigned char>& request_binary = {});
     void invoke_void(const std::string& method, const nlohmann::json& payload = {});
     std::string last_error() const;
 
@@ -40,12 +49,17 @@ private:
         std::mutex mutex;
         std::condition_variable cv;
         bool ready{false};
+        bool expects_binary{false};
+        bool json_received{false};
+        bool binary_received{false};
         nlohmann::json payload;
+        std::vector<unsigned char> binary;
     };
 
-    nlohmann::json request(const std::string& method, const nlohmann::json& payload);
+    RpcBinaryReply request_impl(const std::string& method, const nlohmann::json& payload, const std::vector<unsigned char>& request_binary, bool skip_handshake);
+    bool ensure_handshake();
     bool start_locked();
-    void stop_locked();
+    void stop();
     void reader_loop();
 
     mutable std::mutex m_state_mutex;
@@ -55,7 +69,8 @@ private:
     int m_next_id{1};
     std::string m_last_error;
     std::map<int, std::shared_ptr<Pending>> m_pending;
-    bool m_reader_stop{false};
+    std::atomic<bool> m_reader_stop{false};
+    bool m_handshake_ok{false};
 };
 
 }
