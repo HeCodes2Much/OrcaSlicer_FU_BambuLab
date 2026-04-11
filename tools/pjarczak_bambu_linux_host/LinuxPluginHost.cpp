@@ -87,7 +87,7 @@ std::string env_or(const char* name, const char* fallback)
 
 std::string windows_path_to_wsl(std::string path)
 {
-    if (path.rfind("\\?\", 0) == 0)
+    if (path.rfind("\\\\?\\", 0) == 0)
         path.erase(0, 4);
 
     if (path.size() < 3)

@@ -3286,6 +3286,24 @@ void pjarczak_copy_local_overlay_runtime(const boost::filesystem::path& plugin_f
 
     for (const std::string& file_name : runtime_files)
         pjarczak_copy_runtime_file_if_exists(exe_dir, plugin_folder, file_name);
+
+    const auto runtime_src_dir = exe_dir / "pjarczak_bambu_linux_host.runtime";
+    const auto runtime_dst_dir = plugin_folder / "pjarczak_bambu_linux_host.runtime";
+    if (boost::filesystem::exists(runtime_src_dir) && boost::filesystem::is_directory(runtime_src_dir)) {
+        try {
+            if (boost::filesystem::exists(runtime_dst_dir))
+                boost::filesystem::remove_all(runtime_dst_dir);
+            copy_directory_recursively(runtime_src_dir, runtime_dst_dir);
+        } catch (const std::exception& e) {
+            BOOST_LOG_TRIVIAL(error) << "[copy_network_if_available] copy runtime dir failed: "
+                                     << runtime_src_dir.string() << " -> "
+                                     << runtime_dst_dir.string() << ", err=" << e.what();
+        } catch (...) {
+            BOOST_LOG_TRIVIAL(error) << "[copy_network_if_available] copy runtime dir failed: "
+                                     << runtime_src_dir.string() << " -> "
+                                     << runtime_dst_dir.string() << ", unknown error";
+        }
+    }
 }
 
 void GUI_App::copy_network_if_available()
