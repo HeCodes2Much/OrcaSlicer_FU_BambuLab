@@ -2,21 +2,33 @@ param(
     [string]$PackageDir = "",
     [string]$DistroName = "",
     [string]$PluginCacheDir = "",
-    [switch]$AllowMissingLinuxPlugin,
-    [switch]$SkipProbe
+    [switch]$AllowMissingLinuxPlugin
 )
 
 $ErrorActionPreference = 'Stop'
+if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+    $script:__pj_prev_native_pref = $PSNativeCommandUseErrorActionPreference
+    $PSNativeCommandUseErrorActionPreference = $false
+}
 
 function Get-ScriptDir {
-    if ($PSScriptRoot) { return $PSScriptRoot }
-    if ($PSCommandPath) { return (Split-Path -Parent $PSCommandPath) }
-    if ($MyInvocation.MyCommand -and $MyInvocation.MyCommand.Path) { return (Split-Path -Parent $MyInvocation.MyCommand.Path) }
+    if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        return $PSScriptRoot
+    }
+    if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+        return (Split-Path -Parent $PSCommandPath)
+    }
+    if ($MyInvocation.MyCommand -and -not [string]::IsNullOrWhiteSpace($MyInvocation.MyCommand.Path)) {
+        return (Split-Path -Parent $MyInvocation.MyCommand.Path)
+    }
     return (Get-Location).Path
 }
 
 function Convert-FileToLf([string]$Path) {
-    if ([string]::IsNullOrWhiteSpace($Path) -or !(Test-Path $Path)) { return }
+    if ([string]::IsNullOrWhiteSpace($Path) -or !(Test-Path $Path)) {
+        return
+    }
+
     $content = [System.IO.File]::ReadAllText($Path)
     $content = $content.Replace("`r`n", "`n").Replace("`r", "`n")
     $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
@@ -27,11 +39,71 @@ function To-WslPath([string]$Path) {
     $full = [System.IO.Path]::GetFullPath($Path)
     if ($full.Length -ge 2 -and $full[1] -eq ':') {
         $drive = $full.Substring(0, 1).ToLowerInvariant()
-        $tail = $full.Substring(2).Replace('\', '/')
-        if ($tail.StartsWith('/')) { $tail = $tail.Substring(1) }
+        $tail = ($full.Substring(2) -replace '\\', '/')
+        if ($tail.StartsWith('/')) {
+            $tail = $tail.Substring(1)
+        }
         return "/mnt/$drive/$tail"
     }
-    return $full.Replace('\', '/')
+    return ($full -replace '\\', '/')
+}
+
+function Read-TextAuto([string]$Path) {
+    if (!(Test-Path $Path)) {
+        return ''
+    }
+
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -eq 0) {
+        return ''
+    }
+
+    if ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) {
+        return ([System.Text.Encoding]::Unicode.GetString($bytes, 2, $bytes.Length - 2) -replace "`0", '')
+    }
+    if ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFE -and $bytes[1] -eq 0xFF) {
+        return ([System.Text.Encoding]::BigEndianUnicode.GetString($bytes, 2, $bytes.Length - 2) -replace "`0", '')
+    }
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        return ([System.Text.Encoding]::UTF8.GetString($bytes, 3, $bytes.Length - 3) -replace "`0", '')
+    }
+
+    for ($i = 1; $i -lt [Math]::Min($bytes.Length, 64); $i += 2) {
+        if ($bytes[$i] -eq 0) {
+            return ([System.Text.Encoding]::Unicode.GetString($bytes) -replace "`0", '')
+        }
+    }
+
+    return ([System.Text.Encoding]::UTF8.GetString($bytes) -replace "`0", '')
+}
+
+function Normalize-NativeText([string]$Text) {
+    if ([string]::IsNullOrEmpty($Text)) {
+        return ''
+    }
+    $value = $Text -replace "`0", ''
+    $value = $value -replace "`r`n", "`n"
+    $value = $value -replace "`r", "`n"
+    return $value
+}
+
+function Invoke-NativeCapture([string]$FilePath, [string[]]$ArgumentList) {
+    $stdoutPath = [System.IO.Path]::GetTempFileName()
+    $stderrPath = [System.IO.Path]::GetTempFileName()
+    try {
+        $proc = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -Wait -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden
+        $stdoutText = if (Test-Path $stdoutPath) { Normalize-NativeText (Read-TextAuto $stdoutPath) } else { '' }
+        $stderrText = if (Test-Path $stderrPath) { Normalize-NativeText (Read-TextAuto $stderrPath) } else { '' }
+        $combined = (($stdoutText + "`n" + $stderrText).Trim())
+        return @{
+            ExitCode = $proc.ExitCode
+            StdOut = $stdoutText
+            StdErr = $stderrText
+            Combined = $combined
+        }
+    } finally {
+        Remove-Item -Force -ErrorAction SilentlyContinue $stdoutPath, $stderrPath
+    }
 }
 
 if ([string]::IsNullOrWhiteSpace($PackageDir)) {
@@ -42,8 +114,17 @@ $PackageDir = [System.IO.Path]::GetFullPath($PackageDir)
 if ([string]::IsNullOrWhiteSpace($PluginCacheDir)) {
     if ($env:PJARCZAK_BAMBU_WINDOWS_PLUGIN_CACHE_DIR) {
         $PluginCacheDir = $env:PJARCZAK_BAMBU_WINDOWS_PLUGIN_CACHE_DIR
-    } elseif ($env:APPDATA) {
-        $PluginCacheDir = Join-Path $env:APPDATA 'OrcaSlicer\ota'
+    } else {
+        $subdirFile = Join-Path $PackageDir 'pjarczak_plugin_cache_subdir.txt'
+        if ((-not [string]::IsNullOrWhiteSpace($env:APPDATA)) -and (Test-Path $subdirFile)) {
+            $subdir = (Get-Content $subdirFile -Raw).Trim()
+            if (-not [string]::IsNullOrWhiteSpace($subdir)) {
+                $PluginCacheDir = Join-Path $env:APPDATA $subdir
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($PluginCacheDir) -and $env:APPDATA) {
+            $PluginCacheDir = Join-Path $env:APPDATA 'OrcaSlicer\ota\plugins'
+        }
     }
 }
 if (-not [string]::IsNullOrWhiteSpace($PluginCacheDir)) {
@@ -51,13 +132,9 @@ if (-not [string]::IsNullOrWhiteSpace($PluginCacheDir)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($DistroName)) {
-    if ($env:PJARCZAK_WSL_DISTRO) {
-        $DistroName = $env:PJARCZAK_WSL_DISTRO.Trim()
-    } else {
-        $distroFile = Join-Path $PackageDir 'pjarczak_wsl_distro.txt'
-        if (Test-Path $distroFile) {
-            $DistroName = (Get-Content $distroFile -Raw).Trim()
-        }
+    $distroFile = Join-Path $PackageDir 'pjarczak_wsl_distro.txt'
+    if (Test-Path $distroFile) {
+        $DistroName = (Get-Content $distroFile -Raw).Trim()
     }
 }
 if ([string]::IsNullOrWhiteSpace($DistroName)) {
@@ -65,47 +142,69 @@ if ([string]::IsNullOrWhiteSpace($DistroName)) {
 }
 
 $requiredFiles = @(
+    'pjarczak_bambu_networking_bridge.dll',
     'pjarczak_wsl_distro.txt',
     'install_runtime.ps1',
     'verify_runtime.ps1',
-    'pjarczak_wsl_run_host.sh',
     'pjarczak_bambu_linux_host',
-    'pjarczak_bambu_linux_host_abi1',
-    'pjarczak_bambu_linux_host_abi0',
     'windows-wsl2-rootfs.tar'
 )
+
 foreach ($name in $requiredFiles) {
     $path = Join-Path $PackageDir $name
-    if (!(Test-Path $path)) { throw "Missing package file: $name" }
+    if (!(Test-Path $path)) {
+        throw "Missing package file: $name"
+    }
 }
 
 $bootstrapPath = Join-Path $PackageDir 'pjarczak_wsl_run_host.sh'
+if (!(Test-Path $bootstrapPath)) { $bootstrapPath = Join-Path $PackageDir 'pjarczak-wsl-run-host.sh' }
+if (!(Test-Path $bootstrapPath)) {
+    throw 'Missing package file: pjarczak_wsl_run_host.sh'
+}
 Convert-FileToLf $bootstrapPath
 
 $wsl = Join-Path $env:WINDIR 'System32\wsl.exe'
-if (!(Test-Path $wsl)) { throw 'wsl.exe not found' }
+if (!(Test-Path $wsl)) {
+    throw 'wsl.exe not found'
+}
 
-$distroList = & $wsl -l -q 2>$null
-if ($LASTEXITCODE -ne 0) { throw 'Failed to query installed WSL distros' }
-if (-not ($distroList | ForEach-Object { $_.Trim() } | Where-Object { $_ -eq $DistroName })) {
+$distroList = @()
+$normalizedDistros = @()
+for ($attempt = 0; $attempt -lt 10; $attempt++) {
+    $distroQuery = Invoke-NativeCapture $wsl @('-l', '-q')
+    if ($distroQuery.ExitCode -ne 0) {
+        throw "Failed to query installed WSL distros: $($distroQuery.Combined)"
+    }
+    $distroList = @()
+    if (-not [string]::IsNullOrWhiteSpace($distroQuery.StdOut)) {
+        $distroList = $distroQuery.StdOut -split "`n"
+    }
+    $normalizedDistros = $distroList | ForEach-Object { ($_ -replace "`0", '').Trim() } | Where-Object { $_ }
+    if ($normalizedDistros | Where-Object { $_ -eq $DistroName }) {
+        break
+    }
+    Start-Sleep -Milliseconds 400
+}
+if (-not ($normalizedDistros | Where-Object { $_ -eq $DistroName })) {
     throw "WSL distro '$DistroName' is not installed"
 }
 
 $packageDirWsl = To-WslPath $PackageDir
-$pluginCacheDirWsl = ''
+$pluginCacheDirWsl = ""
 if (-not [string]::IsNullOrWhiteSpace($PluginCacheDir)) {
     $pluginCacheDirWsl = To-WslPath $PluginCacheDir
 }
-$bootstrapWsl = "$packageDirWsl/pjarczak_wsl_run_host.sh"
+$bootstrapWsl = "$packageDirWsl/$([System.IO.Path]::GetFileName($bootstrapPath))"
 
-if ($SkipProbe) {
-    Write-Host 'WSL runtime core OK'
-    exit 0
-}
+Write-Host "Bridge package dir: $PackageDir"
+Write-Host "Plugin cache dir: $PluginCacheDir"
+Write-Host "WSL distro: $DistroName"
+Write-Host "Bootstrap script: $bootstrapPath"
 
-$probe = & $wsl -d $DistroName --user root -- sh $bootstrapWsl --probe $packageDirWsl $pluginCacheDirWsl 2>&1
-if ($LASTEXITCODE -ne 0) {
-    $probeText = ($probe | Out-String).Trim()
+$probe = Invoke-NativeCapture $wsl @('-d', $DistroName, '--user', 'root', '--', 'sh', $bootstrapWsl, '--probe', $packageDirWsl, $pluginCacheDirWsl)
+if ($probe.ExitCode -ne 0) {
+    $probeText = $probe.Combined
     if ($AllowMissingLinuxPlugin -and $probeText -match 'plugin_not_downloaded') {
         Write-Host 'WSL runtime package OK, linux plugin not downloaded yet.'
         Write-Host $probeText
@@ -115,4 +214,4 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host 'WSL runtime probe OK'
-Write-Host (($probe | Out-String).Trim())
+Write-Host $probe.Combined

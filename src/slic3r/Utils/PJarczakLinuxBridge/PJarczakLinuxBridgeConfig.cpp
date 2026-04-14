@@ -7,7 +7,7 @@
 #include <iomanip>
 #include <cstdlib>
 #include <cctype>
-#include <boost/filesystem/operations.hpp>
+#include <filesystem>
 #include <openssl/sha.h>
 #include <nlohmann/json.hpp>
 #include "../bambu_networking.hpp"
@@ -156,7 +156,7 @@ std::string bridge_network_current_dir_name()
 #endif
 }
 
-std::string bridge_network_library_path(const boost::filesystem::path& plugin_folder)
+std::string bridge_network_library_path(const std::filesystem::path& plugin_folder)
 {
 #if defined(_MSC_VER) || defined(_WIN32)
     return (plugin_folder / (bridge_network_module_stem() + ".dll")).string();
@@ -180,16 +180,6 @@ std::string linux_source_library_name()
 std::string host_executable_file_name()
 {
     return "pjarczak_bambu_linux_host";
-}
-
-std::string host_executable_abi1_file_name()
-{
-    return "pjarczak_bambu_linux_host_abi1";
-}
-
-std::string host_executable_abi0_file_name()
-{
-    return "pjarczak_bambu_linux_host_abi0";
 }
 
 std::string mac_host_wrapper_file_name()
@@ -222,6 +212,11 @@ std::string windows_wsl_rootfs_file_name()
     return "windows-wsl2-rootfs.tar";
 }
 
+std::string windows_plugin_cache_subdir_file_name()
+{
+    return "pjarczak_plugin_cache_subdir.txt";
+}
+
 bool is_linux_payload_filename(const std::string& file_name)
 {
     return file_name == linux_network_library_name() || file_name == linux_source_library_name();
@@ -241,15 +236,13 @@ bool is_overlay_runtime_filename(const std::string& file_name)
     return file_name == linux_payload_manifest_file_name() ||
            file_name == bridge_network_current_dir_name() ||
            file_name == host_executable_file_name() ||
-           file_name == host_executable_abi1_file_name() ||
-           file_name == host_executable_abi0_file_name() ||
            file_name == mac_host_wrapper_file_name() ||
            file_name == windows_wsl_distro_file_name() ||
            file_name == windows_wsl_import_script_file_name() ||
            file_name == windows_wsl_validate_script_file_name() ||
            file_name == windows_wsl_bootstrap_script_file_name() ||
            file_name == windows_wsl_rootfs_file_name() ||
-           file_name == "install_runtime.cmd" ||
+           file_name == windows_plugin_cache_subdir_file_name() ||
            is_linux_payload_filename(file_name);
 }
 
@@ -300,7 +293,7 @@ std::string linux_payload_manifest_file_name()
     return "linux_payload_manifest.json";
 }
 
-std::string linux_payload_manifest_path(const boost::filesystem::path& plugin_folder)
+std::string linux_payload_manifest_path(const std::filesystem::path& plugin_folder)
 {
     return (plugin_folder / linux_payload_manifest_file_name()).string();
 }
@@ -369,7 +362,7 @@ bool validate_linux_payload_file_against_manifest(const std::string& file_path, 
         set_reason(reason, "manifest parse failed");
         return false;
     }
-    const boost::filesystem::path p(file_path);
+    const std::filesystem::path p(file_path);
     const auto* entry = find_manifest_entry(root, p.filename().string());
     if (!entry) {
         set_reason(reason, "file not found in manifest");
@@ -404,10 +397,10 @@ bool validate_linux_payload_file_against_manifest(const std::string& file_path, 
     return true;
 }
 
-bool validate_linux_payload_set_against_manifest(const boost::filesystem::path& plugin_folder, std::string* reason)
+bool validate_linux_payload_set_against_manifest(const std::filesystem::path& plugin_folder, std::string* reason)
 {
     const auto manifest = linux_payload_manifest_path(plugin_folder);
-    if (!boost::filesystem::exists(manifest)) {
+    if (!std::filesystem::exists(manifest)) {
         set_reason(reason, "manifest missing");
         return false;
     }
@@ -425,7 +418,7 @@ bool validate_linux_payload_set_against_manifest(const boost::filesystem::path& 
 
 bool validate_linux_payload_file(const std::string& file_path, std::string* reason)
 {
-    const boost::filesystem::path p(file_path);
+    const std::filesystem::path p(file_path);
     if (!is_linux_payload_filename(p.filename().string())) {
         set_reason(reason, "unexpected payload filename");
         return false;
@@ -436,7 +429,7 @@ bool validate_linux_payload_file(const std::string& file_path, std::string* reas
         return false;
     }
     const auto manifest = linux_payload_manifest_path(p.parent_path());
-    if (boost::filesystem::exists(manifest))
+    if (std::filesystem::exists(manifest))
         return validate_linux_payload_file_against_manifest(file_path, manifest, reason);
     set_reason(reason, "ok");
     return true;

@@ -100,17 +100,22 @@ std::string configured_distro_name(const std::filesystem::path& plugin_dir)
     return read_text_file_trimmed(plugin_dir / windows_wsl_distro_file_name());
 }
 
-std::filesystem::path configured_plugin_cache_dir()
+std::filesystem::path configured_plugin_cache_dir(const std::filesystem::path& plugin_dir)
 {
     const auto env_value = required_env("PJARCZAK_BAMBU_WINDOWS_PLUGIN_CACHE_DIR");
     if (!env_value.empty())
         return std::filesystem::path(env_value);
 
     const auto appdata = required_env("APPDATA");
-    if (!appdata.empty())
-        return std::filesystem::path(appdata) / "OrcaSlicer" / "ota";
+    if (appdata.empty())
+        return {};
 
-    return {};
+    const auto subdir_file = plugin_dir / windows_plugin_cache_subdir_file_name();
+    const auto configured_subdir = read_text_file_trimmed(subdir_file);
+    if (!configured_subdir.empty())
+        return std::filesystem::path(appdata) / std::filesystem::path(configured_subdir);
+
+    return std::filesystem::path(appdata) / "OrcaSlicer" / "ota" / "plugins";
 }
 
 std::string wsl_exe_path()
@@ -145,8 +150,6 @@ std::string first_missing_runtime_file(const std::filesystem::path& plugin_dir)
 {
     for (const auto& name : {
             host_executable_file_name(),
-            host_executable_abi1_file_name(),
-            host_executable_abi0_file_name(),
             windows_wsl_distro_file_name()
         }) {
         if (!std::filesystem::exists(plugin_dir / name))
@@ -188,6 +191,10 @@ std::string launch_preflight_error()
     if (distro.empty())
         return "PJARCZAK_WSL_DISTRO is not set and pjarczak_wsl_distro.txt is missing or empty";
 
+    const auto plugin_cache_dir = configured_plugin_cache_dir(plugin_dir);
+    if (plugin_cache_dir.empty())
+        return "Windows plugin cache dir is not configured";
+
     return {};
 }
 
@@ -203,7 +210,7 @@ LaunchSpec build_default_launch_spec()
         return spec;
     }
 
-    const auto plugin_cache_dir = configured_plugin_cache_dir();
+    const auto plugin_cache_dir = configured_plugin_cache_dir(plugin_dir);
     const auto bootstrap_path = resolve_bootstrap_script_path(plugin_dir);
     const std::string plugin_dir_wsl = to_wsl_path(plugin_dir);
     const std::string plugin_cache_wsl = plugin_cache_dir.empty() ? std::string() : to_wsl_path(plugin_cache_dir);

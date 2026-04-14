@@ -1,7 +1,6 @@
 #include "LinuxPluginHost.hpp"
 
 #include "../../shared/pjarczak_linux_plugin_bridge_core/BridgeCoreJson.hpp"
-#include "../../shared/pjarczak_linux_plugin_bridge_core/BridgeAuthPayload.hpp"
 #include "../../src/slic3r/Utils/bambu_networking.hpp"
 #include "../../src/slic3r/GUI/Printer/BambuTunnel.h"
 #include "../../src/slic3r/Utils/PJarczakLinuxBridge/PJarczakLinuxBridgeCompat.hpp"
@@ -15,9 +14,8 @@
 #include <cstdio>
 #include <cstdint>
 #include <sstream>
-#include <iostream>
+#include <boost/lexical_cast.hpp>
 #include <filesystem>
-#include <unistd.h>
 
 using namespace std::chrono_literals;
 
@@ -88,25 +86,37 @@ std::string env_or(const char* name, const char* fallback)
     return fallback;
 }
 
-std::mutex g_host_log_mutex;
-
-std::string trim_for_log(const std::string& value, std::size_t limit = 8192)
+std::string windows_path_to_wsl(std::string path)
 {
-    if (value.size() <= limit)
-        return value;
-    return value.substr(0, limit) + "...<truncated>";
+    if (path.rfind("\\\\?\\", 0) == 0)
+        path.erase(0, 4);
+
+    if (path.size() < 3)
+        return path;
+
+    const char drive = path[0];
+    const bool drive_ok =
+        (drive >= 'A' && drive <= 'Z') ||
+        (drive >= 'a' && drive <= 'z');
+
+    if (!drive_ok || path[1] != ':' || (path[2] != '\\' && path[2] != '/'))
+        return path;
+
+    std::string out = "/mnt/";
+    out.push_back((drive >= 'A' && drive <= 'Z') ? static_cast<char>(drive - 'A' + 'a') : drive);
+    out.push_back('/');
+
+    for (std::size_t i = 3; i < path.size(); ++i)
+        out.push_back(path[i] == '\\' ? '/' : path[i]);
+
+    return out;
 }
 
-void host_log_json(const std::string& kind, const nlohmann::json& payload)
+std::vector<std::string> windows_paths_to_wsl(std::vector<std::string> paths)
 {
-    try {
-        nlohmann::json line;
-        line["kind"] = kind;
-        line["payload"] = payload;
-        std::lock_guard<std::mutex> lock(g_host_log_mutex);
-        std::cerr << "[PJBRIDGE] " << trim_for_log(line.dump()) << std::endl;
-    } catch (...) {
-    }
+    for (auto& path : paths)
+        path = windows_path_to_wsl(std::move(path));
+    return paths;
 }
 
 
@@ -217,8 +227,8 @@ BBL::PrintParams print_params_from_json(const nlohmann::json& j)
     p.task_name = j.value("task_name", std::string());
     p.project_name = j.value("project_name", std::string());
     p.preset_name = j.value("preset_name", std::string());
-    p.filename = j.value("filename", std::string());
-    p.config_filename = j.value("config_filename", std::string());
+    p.filename = windows_path_to_wsl(j.value("filename", std::string()));
+    p.config_filename = windows_path_to_wsl(j.value("config_filename", std::string()));
     p.plate_index = j.value("plate_index", 0);
     p.ftp_folder = j.value("ftp_folder", std::string());
     p.ftp_file = j.value("ftp_file", std::string());
@@ -234,7 +244,7 @@ BBL::PrintParams print_params_from_json(const nlohmann::json& j)
     p.stl_design_id = j.value("stl_design_id", 0);
     p.origin_model_id = j.value("origin_model_id", std::string());
     p.print_type = j.value("print_type", std::string());
-    p.dst_file = j.value("dst_file", std::string());
+    p.dst_file = windows_path_to_wsl(j.value("dst_file", std::string()));
     p.dev_name = j.value("dev_name", std::string());
     p.dev_ip = j.value("dev_ip", std::string());
     p.use_ssl_for_ftp = j.value("use_ssl_for_ftp", false);
@@ -708,29 +718,6 @@ nlohmann::json LinuxPluginHost::handle(const std::string& method, const nlohmann
     if (method == "bridge.capabilities") {
         return {{"ok", true}, {"agent_count", m_agents.size()}, {"auth_capabilities", auth_capabilities()}};
     }
-    if (method == "bridge.runtime_info") {
-        char cwd_buf[4096] = {0};
-        std::string cwd;
-        if (::getcwd(cwd_buf, sizeof(cwd_buf) - 1))
-            cwd = cwd_buf;
-        nlohmann::json out = nlohmann::json::object();
-        out["ok"] = true;
-        out["cwd"] = cwd;
-        out["home"] = env_or("HOME", "");
-        out["plugin_dir"] = env_or("PJARCZAK_BAMBU_PLUGIN_DIR", "");
-        out["network_so"] = env_or("PJARCZAK_BAMBU_NETWORK_SO", "");
-        out["source_so"] = env_or("PJARCZAK_BAMBU_SOURCE_SO", "");
-        out["ssl_cert_file"] = env_or("SSL_CERT_FILE", "");
-        out["ssl_cert_dir"] = env_or("SSL_CERT_DIR", "");
-        out["curl_ca_bundle"] = env_or("CURL_CA_BUNDLE", "");
-        out["ld_library_path"] = env_or("LD_LIBRARY_PATH", "");
-        out["network_loaded"] = m_network != nullptr;
-        out["source_loaded"] = m_source != nullptr;
-        out["network_status"] = m_network_status;
-        out["source_status"] = m_source_status;
-        host_log_json("bridge.runtime_info", out);
-        return out;
-    }
 
     if (method == "bridge.job_cancel") {
         set_job_cancel(payload.value("job_id", 0LL), payload.value("cancel", true));
@@ -748,7 +735,8 @@ nlohmann::json LinuxPluginHost::handle(const std::string& method, const nlohmann
     if (method == "net.create_agent") {
         auto f = net<void* (*)(std::string)>("bambu_network_create_agent");
         if (!f) return not_supported(method);
-        void* raw = f(payload.value("log_dir", std::string()));
+        const std::string log_dir = windows_path_to_wsl(payload.value("log_dir", std::string()));
+        void* raw = f(log_dir);
         const auto id = m_next_agent++;
         {
             std::lock_guard<std::mutex> lock(m_state_mutex);
@@ -809,18 +797,14 @@ nlohmann::json LinuxPluginHost::handle(const std::string& method, const nlohmann
     if (method == "net.set_config_dir") {
         auto f = net<int (*)(void*, std::string)>("bambu_network_set_config_dir");
         auto a = lookup_agent();
-        return f && a ? nlohmann::json{{"ok", true}, {"value", f(a, payload.value("config_dir", std::string()))}} : not_supported(method);
+        const std::string config_dir = windows_path_to_wsl(payload.value("config_dir", std::string()));
+        return f && a ? nlohmann::json{{"ok", true}, {"value", f(a, config_dir)}} : not_supported(method);
     }
     if (method == "net.set_cert_file") {
         auto f = net<int (*)(void*, std::string, std::string)>("bambu_network_set_cert_file");
         auto a = lookup_agent();
-        if (!f || !a) return not_supported(method);
-        const auto folder = payload.value("folder", std::string());
-        const auto filename = payload.value("filename", std::string());
-        const int ret = f(a, folder, filename);
-        nlohmann::json r{{"ok", true}, {"value", ret}, {"folder", folder}, {"filename", filename}, {"ssl_cert_file", env_or("SSL_CERT_FILE", "")}, {"curl_ca_bundle", env_or("CURL_CA_BUNDLE", "")}};
-        host_log_json("net.set_cert_file", r);
-        return r;
+        const std::string folder = windows_path_to_wsl(payload.value("folder", std::string()));
+        return f && a ? nlohmann::json{{"ok", true}, {"value", f(a, folder, payload.value("filename", std::string()))}} : not_supported(method);
     }
     if (method == "net.set_country_code") {
         auto f = net<int (*)(void*, std::string)>("bambu_network_set_country_code");
@@ -945,10 +929,8 @@ nlohmann::json LinuxPluginHost::handle(const std::string& method, const nlohmann
         auto f = net<int (*)(void*, std::string)>("bambu_network_change_user");
         auto a = lookup_agent();
         if (!f || !a) return not_supported(method);
-        const auto original_user_info = payload.value("user_info", std::string());
-        const auto normalized_user_info = normalize_change_user_payload_string(original_user_info);
-        const int ret = f(a, normalized_user_info);
-        nlohmann::json r{{"ok", true}, {"value", ret}, {"user_info_original", original_user_info}, {"user_info_normalized", normalized_user_info}, {"user_info_was_normalized", normalized_user_info != original_user_info}};
+        const int ret = f(a, payload.value("user_info", std::string()));
+        nlohmann::json r{{"ok", true}, {"value", ret}};
         auto g1 = net<bool (*)(void*)>("bambu_network_is_user_login"); if (g1) r["logged_in"] = g1(a);
         auto g2 = net<std::string (*)(void*)>("bambu_network_get_user_id"); if (g2) r["user_id"] = g2(a);
         auto g3 = net<std::string (*)(void*)>("bambu_network_get_user_name"); if (g3) r["user_name"] = g3(a);
@@ -958,7 +940,6 @@ nlohmann::json LinuxPluginHost::handle(const std::string& method, const nlohmann
         auto g7 = net<std::string (*)(void*)>("bambu_network_build_logout_cmd"); if (g7) r["logout_cmd"] = g7(a);
         auto g8 = net<std::string (*)(void*)>("bambu_network_build_login_info"); if (g8) r["login_info"] = g8(a);
         auto g9 = net<std::string (*)(void*)>("bambu_network_get_bambulab_host"); if (g9) r["bambulab_host"] = g9(a);
-        host_log_json("net.change_user", r);
         return r;
     }
 
@@ -1124,7 +1105,7 @@ nlohmann::json LinuxPluginHost::handle(const std::string& method, const nlohmann
     if (method == "net.get_setting_list2") { auto f = net<int (*)(void*, std::string, CheckFn, ProgressFn, WasCancelledFn)>("bambu_network_get_setting_list2"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); const auto job_id = payload.value("client_job_id", 0LL); const auto params = payload.value("params", nlohmann::json::object()); auto job = std::make_shared<HostJobState>(); job->job_id = job_id; job->agent_handle = agent_id; job->kind = "get_setting_list2"; register_job(job); const int ret = f(a, params.value("bundle_version", std::string()), [this, job](std::map<std::string, std::string> info) { const auto request_id = m_next_wait_request.fetch_add(1); { std::lock_guard<std::mutex> lock(job->wait_mutex); job->wait_request_id = request_id; job->wait_reply_ready = false; job->wait_reply_value = true; } queue_event(job->agent_handle, "job.check", {{"job_id", job->job_id}, {"kind", job->kind}, {"request_id", request_id}, {"info", info}}); std::unique_lock<std::mutex> lock(job->wait_mutex); job->wait_cv.wait(lock, [&] { return job->wait_reply_ready && job->wait_request_id == request_id; }); return job->wait_reply_value; }, [this, job](int progress) { queue_event(job->agent_handle, "job.progress", {{"job_id", job->job_id}, {"kind", job->kind}, {"progress", progress}}); }, [job]() { return job->cancel_requested.load(); }); unregister_job(job_id); return {{"ok", true}, {"value", ret}, {"job_id", job_id}}; }
     if (method == "net.put_setting") { auto f = net<int (*)(void*, std::string, std::string, std::map<std::string, std::string>*, unsigned int*)>("bambu_network_put_setting"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); auto values = json_to_string_map(payload.value("values", nlohmann::json::object())); unsigned int http_code = 0; const int ret = f(a, payload.value("setting_id", std::string()), payload.value("name", std::string()), &values, &http_code); return {{"ok", true}, {"value", ret}, {"http_code", http_code}}; }
     if (method == "net.delete_setting") { auto f = net<int (*)(void*, std::string)>("bambu_network_delete_setting"); auto a = lookup_agent(); return f && a ? nlohmann::json{{"ok", true}, {"value", f(a, payload.value("setting_id", std::string()))}} : not_supported(method); }
-    if (method == "net.set_extra_http_header") { auto f = net<int (*)(void*, std::map<std::string, std::string>)>("bambu_network_set_extra_http_header"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); auto headers = json_to_string_map(payload.value("headers", nlohmann::json::object())); const int ret = f(a, headers); nlohmann::json r{{"ok", true}, {"value", ret}, {"headers", headers}}; host_log_json("net.set_extra_http_header", r); return r; }
+    if (method == "net.set_extra_http_header") { auto f = net<int (*)(void*, std::map<std::string, std::string>)>("bambu_network_set_extra_http_header"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); auto headers = json_to_string_map(payload.value("headers", nlohmann::json::object())); return {{"ok", true}, {"value", f(a, headers)}}; }
     if (method == "net.get_my_message") { auto f = net<int (*)(void*, int, int, int, unsigned int*, std::string*)>("bambu_network_get_my_message"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); unsigned int http_code = 0; std::string http_body; const int ret = f(a, payload.value("type", 0), payload.value("after", 0), payload.value("limit", 20), &http_code, &http_body); return {{"ok", true}, {"value", ret}, {"http_code", http_code}, {"http_body", http_body}}; }
     if (method == "net.check_user_task_report") { auto f = net<int (*)(void*, int*, bool*)>("bambu_network_check_user_task_report"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); int task_id = 0; bool printable = false; const int ret = f(a, &task_id, &printable); return {{"ok", true}, {"value", ret}, {"task_id", task_id}, {"printable", printable}}; }
     if (method == "net.get_user_print_info") { auto f = net<int (*)(void*, unsigned int*, std::string*)>("bambu_network_get_user_print_info"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); unsigned int http_code = 0; std::string http_body; const int ret = f(a, &http_code, &http_body); return {{"ok", true}, {"value", ret}, {"http_code", http_code}, {"http_body", http_body}}; }
@@ -1138,13 +1119,13 @@ nlohmann::json LinuxPluginHost::handle(const std::string& method, const nlohmann
     if (method == "net.get_model_mall_home_url") { auto f = net<int (*)(void*, std::string*)>("bambu_network_get_model_mall_home_url"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); std::string url; const int ret = f(a, &url); return {{"ok", true}, {"value", ret}, {"url", url}}; }
     if (method == "net.get_model_mall_detail_url") { auto f = net<int (*)(void*, std::string*, std::string)>("bambu_network_get_model_mall_detail_url"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); std::string url; const int ret = f(a, &url, payload.value("id", std::string())); return {{"ok", true}, {"value", ret}, {"url", url}}; }
     if (method == "net.get_subtask") { auto f = net<int (*)(void*, Slic3r::BBLModelTask*, OnGetSubTaskFn)>("bambu_network_get_subtask"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); Slic3r::BBLModelTask task{}; if (payload.contains("task") && payload["task"].is_object()) json_to_model_task(payload["task"], task); return wait_model_task_callback([&](auto cb) { return f(a, &task, cb); }); }
-    if (method == "net.put_model_mall_rating") { auto f = net<int (*)(void*, int, int, std::string, std::vector<std::string>, unsigned int&, std::string&)>("bambu_network_put_model_mall_rating"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); unsigned int http_code = 0; std::string http_error; const int ret = f(a, payload.value("rating_id", 0), payload.value("score", 0), payload.value("content", std::string()), payload.value("images", std::vector<std::string>()), http_code, http_error); return {{"ok", true}, {"value", ret}, {"http_code", http_code}, {"http_error", http_error}}; }
+    if (method == "net.put_model_mall_rating") { auto f = net<int (*)(void*, int, int, std::string, std::vector<std::string>, unsigned int&, std::string&)>("bambu_network_put_model_mall_rating"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); std::vector<std::string> images = windows_paths_to_wsl(payload.value("images", std::vector<std::string>())); unsigned int http_code = 0; std::string http_error; const int ret = f(a, payload.value("rating_id", 0), payload.value("score", 0), payload.value("content", std::string()), images, http_code, http_error); return {{"ok", true}, {"value", ret}, {"http_code", http_code}, {"http_error", http_error}}; }
     if (method == "net.get_oss_config") { auto f = net<int (*)(void*, std::string&, std::string, unsigned int&, std::string&)>("bambu_network_get_oss_config"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); std::string config; unsigned int http_code = 0; std::string http_error; const int ret = f(a, config, payload.value("country_code", std::string()), http_code, http_error); return {{"ok", true}, {"value", ret}, {"config", config}, {"http_code", http_code}, {"http_error", http_error}}; }
-    if (method == "net.put_rating_picture_oss") { auto f = net<int (*)(void*, std::string&, std::string&, std::string, int, unsigned int&, std::string&)>("bambu_network_put_rating_picture_oss"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); std::string config = payload.value("config", std::string()); std::string pic_oss_path = payload.value("pic_oss_path", std::string()); unsigned int http_code = 0; std::string http_error; const int ret = f(a, config, pic_oss_path, payload.value("model_id", std::string()), payload.value("profile_id", 0), http_code, http_error); return {{"ok", true}, {"value", ret}, {"config", config}, {"pic_oss_path", pic_oss_path}, {"http_code", http_code}, {"http_error", http_error}}; }
+    if (method == "net.put_rating_picture_oss") { auto f = net<int (*)(void*, std::string&, std::string&, std::string, int, unsigned int&, std::string&)>("bambu_network_put_rating_picture_oss"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); std::string config = payload.value("config", std::string()); std::string pic_oss_path = windows_path_to_wsl(payload.value("pic_oss_path", std::string())); unsigned int http_code = 0; std::string http_error; const int ret = f(a, config, pic_oss_path, payload.value("model_id", std::string()), payload.value("profile_id", 0), http_code, http_error); return {{"ok", true}, {"value", ret}, {"config", config}, {"pic_oss_path", pic_oss_path}, {"http_code", http_code}, {"http_error", http_error}}; }
     if (method == "net.get_model_mall_rating") { auto f = net<int (*)(void*, int, std::string&, unsigned int&, std::string&)>("bambu_network_get_model_mall_rating"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); std::string rating_result; unsigned int http_code = 0; std::string http_error; const int ret = f(a, payload.value("job_id", 0), rating_result, http_code, http_error); return {{"ok", true}, {"value", ret}, {"rating_result", rating_result}, {"http_code", http_code}, {"http_error", http_error}}; }
     if (method == "net.get_mw_user_preference") { auto f = net<int (*)(void*, std::function<void(std::string)>)>("bambu_network_get_mw_user_preference"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); return wait_string_callback([&](auto cb) { return f(a, cb); }); }
     if (method == "net.get_mw_user_4ulist") { auto f = net<int (*)(void*, int, int, std::function<void(std::string)>)>("bambu_network_get_mw_user_4ulist"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); return wait_string_callback([&](auto cb) { return f(a, payload.value("seed", 0), payload.value("limit", 0), cb); }); }
-    if (method == "net.get_hms_snapshot") { auto f = net<int (*)(void*, std::string, std::string, std::function<void(std::string, int)>)>("bambu_network_get_hms_snapshot"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); return wait_string_int_callback([&](auto cb) { return f(a, payload.value("dev_id", std::string()), payload.value("file_name", std::string()), cb); }); }
+    if (method == "net.get_hms_snapshot") { auto f = net<int (*)(void*, std::string, std::string, std::function<void(std::string, int)>)>("bambu_network_get_hms_snapshot"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); const std::string file_name = windows_path_to_wsl(payload.value("file_name", std::string())); return wait_string_int_callback([&](auto cb) { return f(a, payload.value("dev_id", std::string()), file_name, cb); }); }
 
     if (method == "net.get_my_token") { auto f = net<int (*)(void*, std::string, unsigned int*, std::string*)>("bambu_network_get_my_token"); auto a = lookup_agent(); if (!f || !a) return not_supported(method); unsigned int http_code = 0; std::string http_body; const int ret = f(a, payload.value("ticket", std::string()), &http_code, &http_body); return {{"ok", true}, {"value", ret}, {"http_code", http_code}, {"http_body", http_body}}; }
 
@@ -1394,7 +1375,8 @@ nlohmann::json LinuxPluginHost::handle(const std::string& method, const nlohmann
         auto f = src<int (*)(Bambu_Tunnel*, const char*)>("Bambu_Create");
         if (!f) return not_supported(method);
         Bambu_Tunnel tunnel = nullptr;
-        const int ret = f(&tunnel, payload.value("path", std::string()).c_str());
+        const std::string path = windows_path_to_wsl(payload.value("path", std::string()));
+        const int ret = f(&tunnel, path.c_str());
         if (ret != 0)
             return {{"ok", true}, {"value", ret}, {"tunnel", 0}};
         const auto id = m_next_tunnel++;

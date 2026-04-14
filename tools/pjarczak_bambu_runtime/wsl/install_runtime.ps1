@@ -4,32 +4,29 @@ param(
     [string]$DistroName = "",
     [string]$InstallDir = "",
     [switch]$ReplaceExisting,
-    [switch]$SkipCopyToPluginDir,
-    [switch]$CoreInstallOnly
+    [switch]$SkipCopyToPluginDir
 )
 
 $ErrorActionPreference = 'Stop'
 
 function Get-ScriptDir {
-    if ($PSScriptRoot) { return $PSScriptRoot }
-    if ($PSCommandPath) { return (Split-Path -Parent $PSCommandPath) }
-    if ($MyInvocation.MyCommand -and $MyInvocation.MyCommand.Path) { return (Split-Path -Parent $MyInvocation.MyCommand.Path) }
+    if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        return $PSScriptRoot
+    }
+    if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+        return (Split-Path -Parent $PSCommandPath)
+    }
+    if ($MyInvocation.MyCommand -and -not [string]::IsNullOrWhiteSpace($MyInvocation.MyCommand.Path)) {
+        return (Split-Path -Parent $MyInvocation.MyCommand.Path)
+    }
     return (Get-Location).Path
 }
 
-function Test-IsAdmin {
-    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = New-Object Security.Principal.WindowsPrincipal($id)
-    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-
-function Invoke-Native([string]$FilePath, [string[]]$ArgumentList) {
-    & $FilePath @ArgumentList
-    return $LASTEXITCODE
-}
-
 function Convert-FileToLf([string]$Path) {
-    if ([string]::IsNullOrWhiteSpace($Path) -or !(Test-Path $Path)) { return }
+    if ([string]::IsNullOrWhiteSpace($Path) -or !(Test-Path $Path)) {
+        return
+    }
+
     $content = [System.IO.File]::ReadAllText($Path)
     $content = $content.Replace("`r`n", "`n").Replace("`r", "`n")
     $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
@@ -37,78 +34,103 @@ function Convert-FileToLf([string]$Path) {
 }
 
 function Copy-IfExists([string]$Source, [string]$Destination) {
-    if (!(Test-Path $Source)) { return }
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Destination) | Out-Null
-    Copy-Item -Force $Source $Destination
+    if (Test-Path $Source) {
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Destination) | Out-Null
+        Copy-Item -Force $Source $Destination
+    }
 }
 
-function Resolve-DistroName([string]$BaseDir, [string]$Current) {
-    if (-not [string]::IsNullOrWhiteSpace($Current)) { return $Current }
-    if ($env:PJARCZAK_WSL_DISTRO) { return $env:PJARCZAK_WSL_DISTRO.Trim() }
-    $distroFile = Join-Path $BaseDir 'pjarczak_wsl_distro.txt'
+function Sync-Directory([string]$SourceDir, [string]$DestinationDir) {
+    if (!(Test-Path $SourceDir)) {
+        return
+    }
+    if (Test-Path $DestinationDir) {
+        Remove-Item -Recurse -Force $DestinationDir
+    }
+    New-Item -ItemType Directory -Force -Path $DestinationDir | Out-Null
+    Copy-Item -Recurse -Force (Join-Path $SourceDir '*') $DestinationDir
+}
+
+function Resolve-DistroName([string]$Dir, [string]$Current) {
+    if (-not [string]::IsNullOrWhiteSpace($Current)) {
+        return $Current
+    }
+
+    $distroFile = Join-Path $Dir 'pjarczak_wsl_distro.txt'
     if (Test-Path $distroFile) {
         $value = (Get-Content $distroFile -Raw).Trim()
-        if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            return $value
+        }
     }
-    return 'BambuBridge-OrcaSlicer'
+
+    if ($env:PJARCZAK_WSL_DISTRO) {
+        return $env:PJARCZAK_WSL_DISTRO.Trim()
+    }
+
+    return 'PJARCZAK-BAMBU'
 }
 
+
+function Resolve-PluginCacheDir([string]$Dir) {
+    if ($env:PJARCZAK_BAMBU_WINDOWS_PLUGIN_CACHE_DIR) {
+        return [System.IO.Path]::GetFullPath($env:PJARCZAK_BAMBU_WINDOWS_PLUGIN_CACHE_DIR.Trim())
+    }
+
+    $subdirFile = Join-Path $Dir 'pjarczak_plugin_cache_subdir.txt'
+    if (Test-Path $subdirFile) {
+        $subdir = (Get-Content $subdirFile -Raw).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($subdir)) {
+            if (-not $env:APPDATA) { throw 'APPDATA is not available' }
+            return [System.IO.Path]::GetFullPath((Join-Path $env:APPDATA $subdir))
+        }
+    }
+
+    if (-not $env:APPDATA) { throw 'APPDATA is not available' }
+    return [System.IO.Path]::GetFullPath((Join-Path $env:APPDATA 'OrcaSlicer\ota\plugins'))
+}
+
+$scriptDir = Get-ScriptDir
+$defaultPackageDir = $scriptDir
 if ([string]::IsNullOrWhiteSpace($PackageDir)) {
-    $PackageDir = Get-ScriptDir
+    $PackageDir = $defaultPackageDir
 }
 $PackageDir = [System.IO.Path]::GetFullPath($PackageDir)
 
+$DistroName = Resolve-DistroName $PackageDir $DistroName
+$PluginCacheDir = Resolve-PluginCacheDir $PackageDir
+
 if ([string]::IsNullOrWhiteSpace($PluginDir)) {
-    if (-not $env:APPDATA) { throw 'APPDATA is not available' }
+    if (-not $env:APPDATA) {
+        throw 'APPDATA is not available'
+    }
     $PluginDir = Join-Path $env:APPDATA 'OrcaSlicer\plugins'
 }
 $PluginDir = [System.IO.Path]::GetFullPath($PluginDir)
 
-$PluginCacheDir = if ($env:APPDATA) { Join-Path $env:APPDATA 'OrcaSlicer\ota' } else { '' }
-$DistroName = Resolve-DistroName $PackageDir $DistroName
-
 if ([string]::IsNullOrWhiteSpace($InstallDir)) {
-    if (-not $env:LOCALAPPDATA) { throw 'LOCALAPPDATA is not available' }
+    if (-not $env:LOCALAPPDATA) {
+        throw 'LOCALAPPDATA is not available'
+    }
     $InstallDir = Join-Path $env:LOCALAPPDATA $DistroName
 }
 $InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
 
 $wsl = Join-Path $env:WINDIR 'System32\wsl.exe'
 if (!(Test-Path $wsl)) {
-    throw 'wsl.exe not found. This Windows build does not expose WSL commands.'
-}
-
-$bootstrapPath = Join-Path $PackageDir 'pjarczak_wsl_run_host.sh'
-if (Test-Path $bootstrapPath) {
-    Convert-FileToLf $bootstrapPath
-}
-
-$packageFiles = @(
-    'pjarczak_bambu_linux_host',
-    'pjarczak_bambu_linux_host_abi1',
-    'pjarczak_bambu_linux_host_abi0',
-    'pjarczak_wsl_run_host.sh',
-    'pjarczak_wsl_distro.txt',
-    'install_runtime.ps1',
-    'install_runtime.cmd',
-    'verify_runtime.ps1',
-    'windows-wsl2-rootfs.tar'
-)
-foreach ($name in $packageFiles) {
-    if (!(Test-Path (Join-Path $PackageDir $name))) {
-        throw "Missing package file: $name"
-    }
+    throw 'wsl.exe not found'
 }
 
 if (-not $SkipCopyToPluginDir) {
     New-Item -ItemType Directory -Force -Path $PluginDir | Out-Null
-    $copyNames = @(
+
+    $fileNames = @(
         'pjarczak_bambu_networking_bridge.dll',
         'pjarczak_bambu_linux_host',
-        'pjarczak_bambu_linux_host_abi1',
-        'pjarczak_bambu_linux_host_abi0',
-        'pjarczak_wsl_run_host.sh',
         'pjarczak_wsl_distro.txt',
+        'pjarczak_plugin_cache_subdir.txt',
+        'pjarczak_wsl_run_host.sh',
+        'pjarczak-wsl-run-host.sh',
         'install_runtime.ps1',
         'install_runtime.cmd',
         'verify_runtime.ps1',
@@ -120,97 +142,79 @@ if (-not $SkipCopyToPluginDir) {
         'libBambuSource.so',
         'liblive555.so',
         'libagora_rtc_sdk.so',
-        'libagora-fdkaac.so',
-        'libz.so.1',
-        'libzstd.so.1',
-        'libcrypto.so.3',
-        'libstdc++.so.6',
-        'libgcc_s.so.1',
-        'ca-certificates.crt',
-        'slicer_base64.cer'
+        'libagora-fdkaac.so'
     )
-    foreach ($name in $copyNames) {
+
+    foreach ($name in $fileNames) {
         Copy-IfExists (Join-Path $PackageDir $name) (Join-Path $PluginDir $name)
     }
+
+    Sync-Directory (Join-Path $PackageDir 'pjarczak_bambu_linux_host.runtime') (Join-Path $PluginDir 'pjarczak_bambu_linux_host.runtime')
     $PackageDir = $PluginDir
+
+    Write-Host "Bridge package dir: $PackageDir"
+    Write-Host "Plugin dir: $PluginDir"
+    Write-Host "Plugin cache dir: $PluginCacheDir"
+    Write-Host "WSL distro: $DistroName"
 }
 
-$needCoreInstall = $false
+$requiredFiles = @(
+    'pjarczak_bambu_networking_bridge.dll',
+    'pjarczak_bambu_linux_host',
+    'pjarczak_wsl_distro.txt',
+    'install_runtime.ps1',
+    'verify_runtime.ps1',
+    'windows-wsl2-rootfs.tar'
+)
+
+foreach ($name in $requiredFiles) {
+    $path = Join-Path $PackageDir $name
+    if (!(Test-Path $path)) {
+        throw "Missing package file: $name"
+    }
+}
+
+$bootstrapPath = Join-Path $PackageDir 'pjarczak_wsl_run_host.sh'
+if (!(Test-Path $bootstrapPath)) { $bootstrapPath = Join-Path $PackageDir 'pjarczak-wsl-run-host.sh' }
+if (!(Test-Path $bootstrapPath)) {
+    throw 'Missing package file: pjarczak_wsl_run_host.sh'
+}
+
 try {
     & $wsl --status | Out-Null
-    if ($LASTEXITCODE -ne 0) { $needCoreInstall = $true }
 } catch {
-    $needCoreInstall = $true
+    throw 'WSL is not ready. Run as Administrator once and execute: wsl --install --no-distribution ; wsl --update ; then reboot.'
 }
 
-if ($needCoreInstall -and -not (Test-IsAdmin)) {
-    $self = Join-Path $PackageDir 'install_runtime.ps1'
-    $args = @(
-        '-NoProfile',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', ('"' + $self + '"'),
-        '-PackageDir', ('"' + $PackageDir + '"'),
-        '-PluginDir', ('"' + $PluginDir + '"'),
-        '-DistroName', ('"' + $DistroName + '"'),
-        '-InstallDir', ('"' + $InstallDir + '"'),
-        '-SkipCopyToPluginDir',
-        '-CoreInstallOnly'
-    )
-    $proc = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $args -Wait -PassThru
-    if ($proc.ExitCode -ne 0) { exit $proc.ExitCode }
-    $needCoreInstall = $false
-}
-
-$rebootRequired = $false
-if ($needCoreInstall) {
-    Write-Host 'Installing or enabling WSL core components'
-    $code = Invoke-Native $wsl @('--install', '--no-distribution')
-    if ($code -eq 1641 -or $code -eq 3010) {
-        $rebootRequired = $true
-    } elseif ($code -ne 0) {
-        throw "wsl --install --no-distribution failed with exit code $code"
-    }
-    $code = Invoke-Native $wsl @('--set-default-version', '2')
-    if ($code -ne 0) { throw "wsl --set-default-version 2 failed with exit code $code" }
-    $code = Invoke-Native $wsl @('--update')
-    if ($code -ne 0) { throw "wsl --update failed with exit code $code" }
-}
-
-if ($rebootRequired) {
-    Write-Host 'WSL install requested a reboot.'
-    exit 3010
-}
-
-if ($CoreInstallOnly) {
-    exit 0
-}
-
-& $wsl --status | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    throw 'WSL is still not ready after install/update'
-}
+Convert-FileToLf $bootstrapPath
 
 $distroList = & $wsl -l -q 2>$null
 if ($LASTEXITCODE -ne 0) {
     throw 'Failed to query installed WSL distros'
 }
-$hasDistro = ($distroList | ForEach-Object { $_.Trim() } | Where-Object { $_ -eq $DistroName })
 
-if ($hasDistro -and $ReplaceExisting) {
-    & $wsl --terminate $DistroName 2>$null | Out-Null
-    & $wsl --unregister $DistroName
-    if ($LASTEXITCODE -ne 0) { throw "Failed to unregister existing distro '$DistroName'" }
-    $hasDistro = $false
+$alreadyInstalled = $distroList | ForEach-Object { $_.Trim() } | Where-Object { $_ -eq $DistroName }
+if ($alreadyInstalled) {
+    if ($ReplaceExisting) {
+        & $wsl --terminate $DistroName 2>$null | Out-Null
+        & $wsl --unregister $DistroName
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to unregister existing distro '$DistroName'"
+        }
+        $alreadyInstalled = $null
+    }
 }
 
-if (-not $hasDistro) {
+if (-not $alreadyInstalled) {
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+
     $rootFsTar = Join-Path $PackageDir 'windows-wsl2-rootfs.tar'
     & $wsl --import $DistroName $InstallDir $rootFsTar --version 2
-    if ($LASTEXITCODE -ne 0) { throw "wsl --import failed for distro '$DistroName'" }
+    if ($LASTEXITCODE -ne 0) {
+        throw "wsl --import failed for distro '$DistroName'"
+    }
 
-    $setupCmd = @"
-cat > /etc/wsl.conf <<'WSL_EOF'
+    $wslConf = @'
 [automount]
 enabled=true
 root=/mnt/
@@ -219,13 +223,24 @@ mountFsTab=false
 [interop]
 enabled=true
 appendWindowsPath=false
+'@
+
+    $setupCmd = @"
+cat > /etc/wsl.conf <<'WSL_EOF'
+$wslConf
 WSL_EOF
 mkdir -p /root/.pjarczak-bambu-runtime
 "@
+
     & $wsl -d $DistroName --user root -- sh -lc $setupCmd
-    if ($LASTEXITCODE -ne 0) { throw "Failed to initialize distro '$DistroName'" }
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to initialize distro '$DistroName'"
+    }
+
     & $wsl --terminate $DistroName
-    if ($LASTEXITCODE -ne 0) { throw "Failed to terminate distro '$DistroName' after initialization" }
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to terminate distro '$DistroName' after initialization"
+    }
 }
 
 $verifyArgs = @(
@@ -235,10 +250,24 @@ $verifyArgs = @(
     '-PackageDir', $PackageDir,
     '-DistroName', $DistroName,
     '-PluginCacheDir', $PluginCacheDir,
-    '-AllowMissingLinuxPlugin',
-    '-SkipProbe'
+    '-AllowMissingLinuxPlugin'
 )
-& powershell.exe @verifyArgs
+
+$verifyShell = $null
+$pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+if ($pwshCmd) {
+    $verifyShell = $pwshCmd.Source
+} else {
+    $powershellCmd = Get-Command powershell -ErrorAction SilentlyContinue
+    if ($powershellCmd) {
+        $verifyShell = $powershellCmd.Source
+    }
+}
+if ([string]::IsNullOrWhiteSpace($verifyShell)) {
+    throw 'No PowerShell host found to run verify_runtime.ps1'
+}
+
+& $verifyShell @verifyArgs
 if ($LASTEXITCODE -ne 0) {
     throw 'verify_runtime.ps1 failed'
 }
@@ -247,4 +276,5 @@ Write-Host ''
 Write-Host "WSL runtime installed to: $PackageDir"
 Write-Host "WSL distro: $DistroName"
 Write-Host "WSL install dir: $InstallDir"
-Write-Host 'On first run let Orca download bambunetwork if needed, then restart Orca.'
+Write-Host 'Now start OrcaSlicer.'
+Write-Host 'On first run let it download bambunetwork, close the app completely, then start it again.'

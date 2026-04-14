@@ -57,9 +57,6 @@
 #include <wx/fontutil.h>
 #include <wx/glcanvas.h>
 #include <wx/utils.h>
-#ifdef __WXMSW__
-#include <windows.h>
-#endif
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
 
@@ -3172,79 +3169,6 @@ static const char* pjarczak_legacy_bootstrap_script_name()
     return "pjarczak-wsl-run-host.sh";
 }
 
-
-
-static bool pjarczak_run_hidden_sync(const wxString& command, std::string* combined_output)
-{
-    wxArrayString output;
-    wxArrayString errors;
-    const long rc = wxExecute(command, output, errors, wxEXEC_SYNC | wxEXEC_HIDE_CONSOLE);
-    std::ostringstream oss;
-    for (const auto& line : output)
-        oss << into_u8(line) << "\n";
-    for (const auto& line : errors)
-        oss << into_u8(line) << "\n";
-    if (combined_output)
-        *combined_output = oss.str();
-    return rc == 0;
-}
-
-static void pjarczak_log_multiline(const char* prefix, const std::string& text)
-{
-    std::istringstream iss(text);
-    std::string line;
-    while (std::getline(iss, line)) {
-        if (!line.empty())
-            BOOST_LOG_TRIVIAL(info) << prefix << line;
-    }
-}
-
-static bool pjarczak_ensure_windows_wsl_runtime_ready(const boost::filesystem::path& plugin_folder)
-{
-#ifndef WIN32
-    (void)plugin_folder;
-    return true;
-#else
-    static bool attempted = false;
-    if (attempted)
-        return true;
-    attempted = true;
-
-    const auto verify_script = plugin_folder / Slic3r::PJarczakLinuxBridge::windows_wsl_validate_script_file_name();
-    const auto install_cmd = plugin_folder / "install_runtime.cmd";
-    const auto cache_dir = boost::filesystem::path(wxGetApp().data_dir()) / "ota";
-
-    if (!boost::filesystem::exists(verify_script) || !boost::filesystem::exists(install_cmd)) {
-        BOOST_LOG_TRIVIAL(warning) << "[pjarczak_wsl] missing runtime verification or installer script in " << plugin_folder.string();
-        return false;
-    }
-
-    std::string verify_output;
-    const wxString verify_cmd = wxString::Format(
-        "powershell -NoProfile -ExecutionPolicy Bypass -File \"%s\" -PackageDir \"%s\" -PluginCacheDir \"%s\" -AllowMissingLinuxPlugin",
-        from_u8(verify_script.string()),
-        from_u8(plugin_folder.string()),
-        from_u8(cache_dir.string()));
-    if (pjarczak_run_hidden_sync(verify_cmd, &verify_output)) {
-        pjarczak_log_multiline("[pjarczak_wsl][verify] ", verify_output);
-        return true;
-    }
-
-    BOOST_LOG_TRIVIAL(warning) << "[pjarczak_wsl] verify_runtime.ps1 failed, running installer/repair";
-    pjarczak_log_multiline("[pjarczak_wsl][verify] ", verify_output);
-
-    std::string install_output;
-    const wxString install_cmdline = wxString::Format(
-        "cmd.exe /S /C \"\"%s\" -PackageDir \"%s\" -PluginDir \"%s\"\"",
-        from_u8(install_cmd.string()),
-        from_u8(plugin_folder.string()),
-        from_u8(plugin_folder.string()));
-    const bool install_ok = pjarczak_run_hidden_sync(install_cmdline, &install_output);
-    pjarczak_log_multiline("[pjarczak_wsl][install] ", install_output);
-    return install_ok;
-#endif
-}
-
 bool pjarczak_bridge_payload_ready(const boost::filesystem::path& plugin_folder, std::string* reason)
 {
     if (!Slic3r::PJarczakLinuxBridge::enabled()) {
@@ -3260,11 +3184,10 @@ bool pjarczak_bridge_payload_ready(const boost::filesystem::path& plugin_folder,
     const std::string required_files[] = {
         Slic3r::PJarczakLinuxBridge::bridge_network_current_dir_name(),
         Slic3r::PJarczakLinuxBridge::host_executable_file_name(),
-        Slic3r::PJarczakLinuxBridge::host_executable_abi1_file_name(),
-        Slic3r::PJarczakLinuxBridge::host_executable_abi0_file_name(),
         Slic3r::PJarczakLinuxBridge::windows_wsl_distro_file_name(),
         Slic3r::PJarczakLinuxBridge::windows_wsl_validate_script_file_name(),
         Slic3r::PJarczakLinuxBridge::windows_wsl_rootfs_file_name(),
+        Slic3r::PJarczakLinuxBridge::windows_plugin_cache_subdir_file_name(),
         Slic3r::PJarczakLinuxBridge::linux_network_library_name(),
         Slic3r::PJarczakLinuxBridge::linux_source_library_name()
     };
@@ -3367,14 +3290,13 @@ void pjarczak_copy_local_overlay_runtime(const boost::filesystem::path& plugin_f
     const std::string runtime_files[] = {
         Slic3r::PJarczakLinuxBridge::bridge_network_current_dir_name(),
         Slic3r::PJarczakLinuxBridge::host_executable_file_name(),
-        Slic3r::PJarczakLinuxBridge::host_executable_abi1_file_name(),
-        Slic3r::PJarczakLinuxBridge::host_executable_abi0_file_name(),
         Slic3r::PJarczakLinuxBridge::windows_wsl_distro_file_name(),
         Slic3r::PJarczakLinuxBridge::windows_wsl_import_script_file_name(),
         Slic3r::PJarczakLinuxBridge::windows_wsl_validate_script_file_name(),
         Slic3r::PJarczakLinuxBridge::windows_wsl_bootstrap_script_file_name(),
         pjarczak_legacy_bootstrap_script_name(),
         Slic3r::PJarczakLinuxBridge::windows_wsl_rootfs_file_name(),
+        Slic3r::PJarczakLinuxBridge::windows_plugin_cache_subdir_file_name(),
         Slic3r::PJarczakLinuxBridge::linux_payload_manifest_file_name(),
         "install_runtime.cmd",
         "README_runtime_bridge.txt",
@@ -3577,10 +3499,6 @@ bool GUI_App::on_init_network(bool try_backup)
     auto should_load_networking_plugin = app_config->get_bool("installed_networking");
     const bool bridge_mode = Slic3r::PJarczakLinuxBridge::enabled();
     const boost::filesystem::path bridge_plugin_folder = boost::filesystem::path(data_dir()) / "plugins";
-    if (bridge_mode) {
-        pjarczak_copy_local_overlay_runtime(bridge_plugin_folder);
-        pjarczak_ensure_windows_wsl_runtime_ready(bridge_plugin_folder);
-    }
     std::string bridge_payload_reason;
     const bool bridge_payload_ready = !bridge_mode || pjarczak_bridge_payload_ready(bridge_plugin_folder, &bridge_payload_reason);
     bool create_network_agent = false;
