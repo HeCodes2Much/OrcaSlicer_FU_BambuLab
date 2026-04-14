@@ -6,6 +6,8 @@
 #include "slic3r/GUI/wxExtensions.hpp"
 #include "slic3r/GUI/GUI_App.hpp"
 #include "libslic3r_version.h"
+#include "slic3r/Utils/PJarczakLinuxBridge/PJarczakLinuxBridgeConfig.hpp"
+#include "slic3r/Utils/Http.hpp"
 
 #include <wx/sizer.h>
 #include <wx/toolbar.h>
@@ -31,6 +33,23 @@ using namespace std;
 using namespace nlohmann;
 
 namespace Slic3r { namespace GUI {
+
+namespace {
+std::string pjarczak_browser_login_url(const std::string& host_value, const std::string& locale, const std::string& localhost_base)
+{
+    std::string host = host_value;
+    while (!host.empty() && host.back() == '/')
+        host.pop_back();
+    if (host.rfind("http://", 0) != 0 && host.rfind("https://", 0) != 0)
+        host = "https://bambulab.com";
+    std::string lang = locale.empty() ? "en" : locale;
+    std::string callback = host + "/sign-in/callback?source=portal&locale=" + Http::url_encode(lang) +
+                           "&redirect_url=" + Http::url_encode(localhost_base) +
+                           "&openBy=suite&from=studio&slicerLoginType=ticket";
+    return host + "/sign-in?&from=studio&source=portal&to=" + Http::url_encode(callback);
+}
+}
+
 
 #define NETWORK_OFFLINE_TIMER_ID 10001
 
@@ -76,6 +95,20 @@ ZUserLogin::ZUserLogin() : wxDialog((wxWindow *) (wxGetApp().mainframe), wxID_AN
         CentreOnParent();
     }
     else {
+#ifdef WIN32
+        if (Slic3r::PJarczakLinuxBridge::enabled()) {
+            m_external_browser_mode = true;
+            SetTitle(_L("Login"));
+            wxBoxSizer* m_sizer_main = new wxBoxSizer(wxVERTICAL);
+            auto* m_message = new wxStaticText(this, wxID_ANY, _L("Login opens in your default browser. Finish sign-in there and this dialog will close automatically."), wxDefaultPosition, wxDefaultSize, 0);
+            m_message->Wrap(FromDIP(420));
+            m_sizer_main->Add(m_message, 0, wxALL | wxEXPAND, FromDIP(16));
+            SetSizer(m_sizer_main);
+            m_sizer_main->SetSizeHints(this);
+            SetSize(FromDIP(wxSize(460, 140)));
+            CentreOnParent();
+        } else {
+#endif
         // Get the login URL from the cloud service agent
         wxString strlang = wxGetApp().current_language_code_safe();
         strlang.Replace("_", "-");
@@ -128,6 +161,9 @@ ZUserLogin::ZUserLogin() : wxDialog((wxWindow *) (wxGetApp().mainframe), wxID_AN
         int MaxY = (screenheight - pSize.y) > 0 ? (screenheight - pSize.y) / 2 : 0;
         wxPoint tmpPT((screenwidth - pSize.x) / 2, MaxY);
         Move(tmpPT);
+#ifdef WIN32
+        }
+#endif
     }
     wxGetApp().UpdateDlgDarkUI(this);
 }
@@ -151,7 +187,25 @@ void ZUserLogin::OnTimer(wxTimerEvent &event) {
 
 bool ZUserLogin::run() {
     m_timer = new wxTimer(this, NETWORK_OFFLINE_TIMER_ID);
-    m_timer->Start(8000);
+    m_timer->Start(m_external_browser_mode ? 30000 : 8000);
+
+#ifdef WIN32
+    if (m_external_browser_mode) {
+        NetworkAgent* agent = wxGetApp().getAgent();
+        if (agent) {
+            wxString strlang = wxGetApp().current_language_code_safe();
+            strlang.Replace("_", "-");
+            const std::string host = agent->get_cloud_service_host();
+            m_loopback_port = LOCALHOST_PORT;
+            wxGetApp().start_http_server(m_loopback_port);
+            const std::string localhost = std::string(LOCALHOST_URL) + std::to_string(m_loopback_port);
+            const std::string browser_url = pjarczak_browser_login_url(host, strlang.ToStdString(), localhost);
+            BOOST_LOG_TRIVIAL(info) << "external login url = " << browser_url;
+            wxLaunchDefaultBrowser(wxString::FromUTF8(browser_url));
+            m_networkOk = true;
+        }
+    }
+#endif
 
     if (this->ShowModal() == wxID_OK) {
         return true;

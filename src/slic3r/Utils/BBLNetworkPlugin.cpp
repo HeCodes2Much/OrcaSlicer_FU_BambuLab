@@ -634,6 +634,7 @@ void BBLNetworkPlugin::load_all_function_pointers()
     m_get_subtask = reinterpret_cast<func_get_subtask>(get_function("bambu_network_get_subtask"));
     m_get_model_mall_home_url = reinterpret_cast<func_get_model_mall_home_url>(get_function("bambu_network_get_model_mall_home_url"));
     m_get_model_mall_detail_url = reinterpret_cast<func_get_model_mall_detail_url>(get_function("bambu_network_get_model_mall_detail_url"));
+    m_get_my_token = reinterpret_cast<func_get_my_token>(get_function("bambu_network_get_my_token"));
     m_get_my_profile = reinterpret_cast<func_get_my_profile>(get_function("bambu_network_get_my_profile"));
     m_track_enable = reinterpret_cast<func_track_enable>(get_function("bambu_network_track_enable"));
     m_track_remove_files = reinterpret_cast<func_track_remove_files>(get_function("bambu_network_track_remove_files"));
@@ -737,6 +738,7 @@ void BBLNetworkPlugin::clear_all_function_pointers()
     m_get_subtask = nullptr;
     m_get_model_mall_home_url = nullptr;
     m_get_model_mall_detail_url = nullptr;
+    m_get_my_token = nullptr;
     m_get_my_profile = nullptr;
     m_track_enable = nullptr;
     m_track_remove_files = nullptr;

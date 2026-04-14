@@ -143,6 +143,7 @@ public:
     int get_subtask(BBLModelTask* task, OnGetSubTaskFn getsub_fn);
     int get_model_mall_home_url(std::string* url);
     int get_model_mall_detail_url(std::string* url, std::string id);
+    int get_my_token(std::string ticket, unsigned int* http_code, std::string* http_body);
     int get_my_profile(std::string token, unsigned int* http_code, std::string* http_body);
     int track_enable(bool enable);
     int track_remove_files();

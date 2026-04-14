@@ -182,14 +182,76 @@ std::shared_ptr<HttpServer::Response> HttpServer::bbl_auth_handle_request(const 
 {
     BOOST_LOG_TRIVIAL(info) << "thirdparty_login: get_response";
 
+    NetworkAgent* agent = wxGetApp().getAgent();
+    if (!agent)
+        return std::make_shared<ResponseNotFound>();
+
+    const std::string ticket = url_get_param(url, "ticket");
+    if (!ticket.empty()) {
+        unsigned int token_http_code = 0;
+        std::string token_http_body;
+        const int token_result = agent->get_my_token(ticket, &token_http_code, &token_http_body);
+        BOOST_LOG_TRIVIAL(info) << "thirdparty_login ticket exchange result=" << token_result << ", http_code=" << token_http_code;
+        if (token_result == 0) {
+            std::string access_token;
+            try {
+                json token_j = json::parse(token_http_body);
+                if (token_j.contains("access_token"))
+                    access_token = token_j["access_token"].get<std::string>();
+            } catch (...) {}
+
+            unsigned int profile_http_code = 0;
+            std::string profile_http_body;
+            const int profile_result = access_token.empty() ? -1 : agent->get_my_profile(access_token, &profile_http_code, &profile_http_body);
+            BOOST_LOG_TRIVIAL(info) << "thirdparty_login profile result=" << profile_result << ", http_code=" << profile_http_code;
+            if (profile_result == 0) {
+                json payload;
+                payload["command"] = "user_login";
+                try {
+                    payload["data"] = json::parse(token_http_body);
+                } catch (...) {
+                    payload["data"]["token"] = access_token;
+                }
+                try {
+                    const auto profile_j = json::parse(profile_http_body);
+                    payload["data"]["user"] = profile_j;
+                } catch (...) {}
+
+                agent->change_user(payload.dump());
+                const bool login_ok = agent->is_user_login();
+                if (login_ok) {
+                    wxGetApp().request_user_login(1);
+                    GUI::wxGetApp().CallAfter([] { wxGetApp().ShowUserLogin(false); });
+                }
+
+                const std::string title = login_ok ? "Authentication complete" : "Authentication failed";
+                const std::string message = login_ok
+                    ? "You can return to OrcaSlicer. This window will close automatically."
+                    : "Something went wrong. Please return to OrcaSlicer and try again.";
+                const std::string html =
+                    "<html><head><meta charset=\"utf-8\">"
+                    "<style>body{font-family:Arial,sans-serif;background:#f7f7f7;color:#222;margin:32px;}"
+                    "a.button{display:inline-block;padding:10px 16px;margin-top:12px;background:#0f8bff;color:#fff;text-decoration:none;border-radius:6px;}"
+                    "</style></head><body><div class=\"container\">"
+                    "<h2>" + title + "</h2>"
+                    "<p>" + message + "</p>"
+                    "<script>setTimeout(function(){try{window.close();}catch(e){}},1500);</script>"
+                    "</div></body></html>";
+                return std::make_shared<ResponseHtml>(html);
+            }
+        }
+
+        const std::string html =
+            "<html><head><meta charset=\"utf-8\"></head><body>"
+            "<h2>Authentication failed</h2>"
+            "<p>Something went wrong. Please return to OrcaSlicer and try again.</p>"
+            "</body></html>";
+        return std::make_shared<ResponseHtml>(html);
+    }
+
     const std::string auth_code = url_get_param(url, "code");
     if (!auth_code.empty()) {
         std::string state = url_get_param(url, "state");
-        NetworkAgent* agent = wxGetApp().getAgent();
-        if (!agent) {
-            return std::make_shared<ResponseNotFound>();
-        }
-
         json payload;
         payload["command"] = "user_login";
         payload["data"]["code"] = auth_code;
@@ -224,7 +286,6 @@ std::shared_ptr<HttpServer::Response> HttpServer::bbl_auth_handle_request(const 
         std::string   refresh_token          = url_get_param(url, "refresh_token");
         std::string   expires_in_str         = url_get_param(url, "expires_in");
         std::string   refresh_expires_in_str = url_get_param(url, "refresh_expires_in");
-        NetworkAgent* agent                  = wxGetApp().getAgent();
 
         unsigned int http_code;
         std::string  http_body;
@@ -244,10 +305,9 @@ std::shared_ptr<HttpServer::Response> HttpServer::bbl_auth_handle_request(const 
                     user_avatar = user_j["avatar"].get<std::string>();
                 if (user_j.contains("account"))
                     user_account = user_j["account"].get<std::string>();
-            } catch (...) {
-                ;
-            }
+            } catch (...) {}
             json j;
+            j["command"]                    = "user_login";
             j["data"]["refresh_token"]      = refresh_token;
             j["data"]["token"]              = access_token;
             j["data"]["expires_in"]         = expires_in_str;
@@ -263,14 +323,14 @@ std::shared_ptr<HttpServer::Response> HttpServer::bbl_auth_handle_request(const 
             GUI::wxGetApp().CallAfter([] { wxGetApp().ShowUserLogin(false); });
             std::string location_str = (boost::format("%1%?result=success") % redirect_url).str();
             return std::make_shared<ResponseRedirect>(location_str);
-        } else {
-            std::string error_str    = "get_user_profile_error_" + std::to_string(result);
-            std::string location_str = (boost::format("%1%?result=fail&error=%2%") % redirect_url % error_str).str();
-            return std::make_shared<ResponseRedirect>(location_str);
         }
-    } else {
-        return std::make_shared<ResponseNotFound>();
+
+        std::string error_str    = "get_user_profile_error_" + std::to_string(result);
+        std::string location_str = (boost::format("%1%?result=fail&error=%2%") % redirect_url % error_str).str();
+        return std::make_shared<ResponseRedirect>(location_str);
     }
+
+    return std::make_shared<ResponseNotFound>();
 }
 
 void HttpServer::ResponseNotFound::write_response(std::stringstream& ssOut)

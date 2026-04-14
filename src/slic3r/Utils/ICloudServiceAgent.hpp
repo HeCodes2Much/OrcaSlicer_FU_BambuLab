@@ -351,6 +351,7 @@ public:
     /**
      * Retrieve user's model mall profile.
      */
+    virtual int get_my_token(std::string ticket, unsigned int* http_code, std::string* http_body) = 0;
     virtual int get_my_profile(std::string token, unsigned int* http_code, std::string* http_body) = 0;
 
     // ========================================================================

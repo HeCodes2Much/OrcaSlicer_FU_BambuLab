@@ -146,48 +146,18 @@ jobs:
         run: .\build_release_vs.bat slicer
 
 
-      - name: Ensure WSL is available for runtime validation
+
+      - name: Note about hosted-runner WSL validation
         shell: pwsh
         run: |
-          $wsl = Join-Path $env:WINDIR 'System32\wsl.exe'
-          if (!(Test-Path $wsl)) { throw 'wsl.exe not found' }
-
-          $ready = $false
-          try {
-            & $wsl --status
-            if ($LASTEXITCODE -eq 0) { $ready = $true }
-          } catch {}
-
-          if (-not $ready) {
-            & $wsl --install --no-distribution
-            if ($LASTEXITCODE -ne 0) { throw 'wsl --install --no-distribution failed' }
-          }
-
-          & $wsl --update
-          if ($LASTEXITCODE -ne 0) { throw 'wsl --update failed' }
-
-          & $wsl --status
-          if ($LASTEXITCODE -ne 0) { throw 'WSL is still not ready after install/update' }
+          Write-Host 'Hosted GitHub Windows runners are packaging-only for this bridge.'
+          Write-Host 'Real WSL validation must run on a self-hosted Windows machine or on the end user machine at first launch.'
+          Write-Host 'The bundled install_runtime.ps1 still performs first-run install and repair.'
 
       - name: Show packaged Orca runtime files
         shell: pwsh
         run: |
           Get-ChildItem -Force "$env:GITHUB_WORKSPACE\build\OrcaSlicer" | Format-Table Name, Length -AutoSize
-
-      - name: Install bundled WSL2 Orca runtime into live plugins dir
-        shell: pwsh
-        run: |
-          & "$env:GITHUB_WORKSPACE\build\OrcaSlicer\install_runtime.ps1" -ReplaceExisting
-
-      - name: Show live Orca plugin dir after installer
-        shell: pwsh
-        run: |
-          Get-ChildItem -Force "$env:APPDATA\OrcaSlicer\plugins" | Format-Table Name, Length -AutoSize
-
-      - name: Validate live Orca plugin dir bootstrap package
-        shell: pwsh
-        run: |
-          & "$env:APPDATA\OrcaSlicer\plugins\verify_runtime.ps1" -PackageDir "$env:APPDATA\OrcaSlicer\plugins" -PluginCacheDir "$env:APPDATA\OrcaSlicer\plugins" -AllowMissingLinuxPlugin
 
       - name: Create installer Win
         working-directory: ${{ github.workspace }}/build

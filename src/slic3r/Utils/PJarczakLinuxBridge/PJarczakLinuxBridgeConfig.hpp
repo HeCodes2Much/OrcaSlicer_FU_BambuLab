@@ -19,6 +19,8 @@ std::string bridge_network_library_path(const boost::filesystem::path& plugin_fo
 std::string linux_network_library_name();
 std::string linux_source_library_name();
 std::string host_executable_file_name();
+std::string host_executable_abi1_file_name();
+std::string host_executable_abi0_file_name();
 std::string mac_host_wrapper_file_name();
 std::string windows_wsl_distro_file_name();
 std::string windows_wsl_import_script_file_name();

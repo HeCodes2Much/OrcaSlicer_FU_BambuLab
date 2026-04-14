@@ -97,6 +97,7 @@ public:
     int get_subtask(BBLModelTask* task, OnGetSubTaskFn getsub_fn) override;
     int get_model_mall_home_url(std::string* url) override;
     int get_model_mall_detail_url(std::string* url, std::string id) override;
+    int get_my_token(std::string ticket, unsigned int* http_code, std::string* http_body) override;
     int get_my_profile(std::string token, unsigned int* http_code, std::string* http_body) override;
 
     // Analytics & Tracking

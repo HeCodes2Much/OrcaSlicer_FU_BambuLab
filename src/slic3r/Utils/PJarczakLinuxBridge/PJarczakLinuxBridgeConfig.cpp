@@ -182,6 +182,16 @@ std::string host_executable_file_name()
     return "pjarczak_bambu_linux_host";
 }
 
+std::string host_executable_abi1_file_name()
+{
+    return "pjarczak_bambu_linux_host_abi1";
+}
+
+std::string host_executable_abi0_file_name()
+{
+    return "pjarczak_bambu_linux_host_abi0";
+}
+
 std::string mac_host_wrapper_file_name()
 {
     return "pjarczak-bambu-linux-host-wrapper";
@@ -231,12 +241,15 @@ bool is_overlay_runtime_filename(const std::string& file_name)
     return file_name == linux_payload_manifest_file_name() ||
            file_name == bridge_network_current_dir_name() ||
            file_name == host_executable_file_name() ||
+           file_name == host_executable_abi1_file_name() ||
+           file_name == host_executable_abi0_file_name() ||
            file_name == mac_host_wrapper_file_name() ||
            file_name == windows_wsl_distro_file_name() ||
            file_name == windows_wsl_import_script_file_name() ||
            file_name == windows_wsl_validate_script_file_name() ||
            file_name == windows_wsl_bootstrap_script_file_name() ||
            file_name == windows_wsl_rootfs_file_name() ||
+           file_name == "install_runtime.cmd" ||
            is_linux_payload_filename(file_name);
 }
 

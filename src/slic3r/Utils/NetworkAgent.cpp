@@ -775,6 +775,12 @@ int NetworkAgent::get_model_mall_detail_url(std::string* url, std::string id)
     return -1;
 }
 
+int NetworkAgent::get_my_token(std::string ticket, unsigned int* http_code, std::string* http_body)
+{
+    if (m_cloud_agent) return m_cloud_agent->get_my_token(ticket, http_code, http_body);
+    return -1;
+}
+
 int NetworkAgent::get_my_profile(std::string token, unsigned int* http_code, std::string* http_body)
 {
     if (m_cloud_agent) return m_cloud_agent->get_my_profile(token, http_code, http_body);

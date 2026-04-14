@@ -108,7 +108,7 @@ std::filesystem::path configured_plugin_cache_dir()
 
     const auto appdata = required_env("APPDATA");
     if (!appdata.empty())
-        return std::filesystem::path(appdata) / "OrcaSlicer" / "plugins";
+        return std::filesystem::path(appdata) / "OrcaSlicer" / "ota";
 
     return {};
 }
@@ -145,6 +145,8 @@ std::string first_missing_runtime_file(const std::filesystem::path& plugin_dir)
 {
     for (const auto& name : {
             host_executable_file_name(),
+            host_executable_abi1_file_name(),
+            host_executable_abi0_file_name(),
             windows_wsl_distro_file_name()
         }) {
         if (!std::filesystem::exists(plugin_dir / name))
