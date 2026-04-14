@@ -3287,9 +3287,7 @@ void pjarczak_copy_local_overlay_runtime(const boost::filesystem::path& plugin_f
     const boost::filesystem::path exe_path(into_u8(wxStandardPaths::Get().GetExecutablePath()));
     const boost::filesystem::path exe_dir = exe_path.parent_path();
 
-    const std::string runtime_files[] = {
-        Slic3r::PJarczakLinuxBridge::bridge_network_current_dir_name(),
-        Slic3r::PJarczakLinuxBridge::host_executable_file_name(),
+    const std::string helper_files[] = {
         Slic3r::PJarczakLinuxBridge::windows_wsl_distro_file_name(),
         Slic3r::PJarczakLinuxBridge::windows_wsl_import_script_file_name(),
         Slic3r::PJarczakLinuxBridge::windows_wsl_validate_script_file_name(),
@@ -3297,18 +3295,24 @@ void pjarczak_copy_local_overlay_runtime(const boost::filesystem::path& plugin_f
         pjarczak_legacy_bootstrap_script_name(),
         Slic3r::PJarczakLinuxBridge::windows_wsl_rootfs_file_name(),
         Slic3r::PJarczakLinuxBridge::windows_plugin_cache_subdir_file_name(),
-        Slic3r::PJarczakLinuxBridge::linux_payload_manifest_file_name(),
         "install_runtime.cmd",
         "README_runtime_bridge.txt",
-        "assemble_windows_runtime_bundle.ps1",
-        "libc.so.6",
-        "libstdc++.so.6",
-        "libgcc_s.so.1",
-        "libm.so.6"
+        "assemble_windows_runtime_bundle.ps1"
     };
 
-    for (const std::string& file_name : runtime_files)
+    for (const std::string& file_name : helper_files)
         pjarczak_copy_runtime_file_if_exists(exe_dir, plugin_folder, file_name);
+
+    try {
+        for (auto& dir_entry : boost::filesystem::directory_iterator(exe_dir)) {
+            if (!boost::filesystem::is_regular_file(dir_entry.path()))
+                continue;
+            const std::string file_name = dir_entry.path().filename().string();
+            if (!Slic3r::PJarczakLinuxBridge::is_overlay_runtime_filename(file_name))
+                continue;
+            pjarczak_copy_runtime_file_if_exists(exe_dir, plugin_folder, file_name);
+        }
+    } catch (...) {}
 
     const auto runtime_src_dir = exe_dir / "pjarczak_bambu_linux_host.runtime";
     const auto runtime_dst_dir = plugin_folder / "pjarczak_bambu_linux_host.runtime";

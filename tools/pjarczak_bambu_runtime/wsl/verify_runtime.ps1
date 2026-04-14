@@ -147,6 +147,8 @@ $requiredFiles = @(
     'install_runtime.ps1',
     'verify_runtime.ps1',
     'pjarczak_bambu_linux_host',
+    'pjarczak_bambu_linux_host_abi1',
+    'pjarczak_bambu_linux_host_abi0',
     'windows-wsl2-rootfs.tar'
 )
 

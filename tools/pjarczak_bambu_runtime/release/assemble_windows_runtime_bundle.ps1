@@ -50,12 +50,9 @@ if ($BridgeDll) {
 }
 
 if ($RuntimeDir) {
-    $destRuntime = Join-Path $OutputDir 'pjarczak_bambu_linux_host.runtime'
-    if (Test-Path $destRuntime) {
-        Remove-Item -Recurse -Force $destRuntime
+    Get-ChildItem -Path $RuntimeDir -File -ErrorAction Stop | ForEach-Object {
+        Copy-Item -Force $_.FullName (Join-Path $OutputDir $_.Name)
     }
-    New-Item -ItemType Directory -Force -Path $destRuntime | Out-Null
-    Copy-Item -Recurse -Force (Join-Path $RuntimeDir '*') $destRuntime
 }
 
 Write-Host 'Bundle created:'

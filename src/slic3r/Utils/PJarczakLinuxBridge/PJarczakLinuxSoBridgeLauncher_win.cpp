@@ -150,6 +150,8 @@ std::string first_missing_runtime_file(const std::filesystem::path& plugin_dir)
 {
     for (const auto& name : {
             host_executable_file_name(),
+            std::string("pjarczak_bambu_linux_host_abi1"),
+            std::string("pjarczak_bambu_linux_host_abi0"),
             windows_wsl_distro_file_name()
         }) {
         if (!std::filesystem::exists(plugin_dir / name))

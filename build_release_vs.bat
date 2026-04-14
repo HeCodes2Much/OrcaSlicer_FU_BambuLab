@@ -205,8 +205,13 @@ if not exist "%HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host" (
     exit /b 1
 )
 
-if not exist "%HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host.runtime" (
-    echo Missing linux host runtime directory: %HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host.runtime
+if not exist "%HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host_abi1" (
+    echo Missing linux host ABI1 runtime: %HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host_abi1
+    exit /b 1
+)
+
+if not exist "%HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host_abi0" (
+    echo Missing linux host ABI0 runtime: %HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host_abi0
     exit /b 1
 )
 
@@ -231,8 +236,13 @@ if not exist "%HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host" (
     exit /b 1
 )
 
-if not exist "%HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host.runtime" (
-    echo Missing linux host runtime directory: %HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host.runtime
+if not exist "%HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host_abi1" (
+    echo Missing linux host ABI1 runtime: %HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host_abi1
+    exit /b 1
+)
+
+if not exist "%HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host_abi0" (
+    echo Missing linux host ABI0 runtime: %HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host_abi0
     exit /b 1
 )
 
@@ -258,19 +268,9 @@ if not exist "%INSTALL_DIR%\pjarczak_bambu_networking_bridge.dll" (
     exit /b 1
 )
 
-copy /Y "%HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host" "%INSTALL_DIR%\pjarczak_bambu_linux_host" >nul
-if errorlevel 1 (
-    echo Failed to copy linux host binary into %INSTALL_DIR%
-    exit /b 1
-)
-
-if exist "%INSTALL_DIR%\pjarczak_bambu_linux_host.runtime" (
-    rmdir /S /Q "%INSTALL_DIR%\pjarczak_bambu_linux_host.runtime"
-)
-
-xcopy "%HOST_RUNTIME_DIR%\pjarczak_bambu_linux_host.runtime" "%INSTALL_DIR%\pjarczak_bambu_linux_host.runtime\" /E /I /Y >nul
+xcopy "%HOST_RUNTIME_DIR%\*" "%INSTALL_DIR%\\" /I /Y >nul
 if errorlevel 4 (
-    echo Failed to copy linux host runtime directory into %INSTALL_DIR%
+    echo Failed to copy flat linux host runtime files into %INSTALL_DIR%
     exit /b 1
 )
 

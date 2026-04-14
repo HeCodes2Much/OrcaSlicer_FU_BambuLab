@@ -127,6 +127,8 @@ if (-not $SkipCopyToPluginDir) {
     $fileNames = @(
         'pjarczak_bambu_networking_bridge.dll',
         'pjarczak_bambu_linux_host',
+        'pjarczak_bambu_linux_host_abi1',
+        'pjarczak_bambu_linux_host_abi0',
         'pjarczak_wsl_distro.txt',
         'pjarczak_plugin_cache_subdir.txt',
         'pjarczak_wsl_run_host.sh',
@@ -142,11 +144,20 @@ if (-not $SkipCopyToPluginDir) {
         'libBambuSource.so',
         'liblive555.so',
         'libagora_rtc_sdk.so',
-        'libagora-fdkaac.so'
+        'libagora-fdkaac.so',
+        'ca-certificates.crt',
+        'slicer_base64.cer'
     )
 
     foreach ($name in $fileNames) {
         Copy-IfExists (Join-Path $PackageDir $name) (Join-Path $PluginDir $name)
+    }
+
+    Get-ChildItem -Path $PackageDir -File -ErrorAction SilentlyContinue | ForEach-Object {
+        $name = $_.Name
+        if ($name -match '^lib.+\.so(\..+)?$') {
+            Copy-IfExists $_.FullName (Join-Path $PluginDir $name)
+        }
     }
 
     Sync-Directory (Join-Path $PackageDir 'pjarczak_bambu_linux_host.runtime') (Join-Path $PluginDir 'pjarczak_bambu_linux_host.runtime')
@@ -161,6 +172,8 @@ if (-not $SkipCopyToPluginDir) {
 $requiredFiles = @(
     'pjarczak_bambu_networking_bridge.dll',
     'pjarczak_bambu_linux_host',
+    'pjarczak_bambu_linux_host_abi1',
+    'pjarczak_bambu_linux_host_abi0',
     'pjarczak_wsl_distro.txt',
     'install_runtime.ps1',
     'verify_runtime.ps1',

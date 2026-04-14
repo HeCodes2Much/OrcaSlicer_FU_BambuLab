@@ -139,8 +139,13 @@ copy_linux_bridge_runtime_to_app() {
         exit 1
     fi
 
-    if [ ! -d "$HOST_RUNTIME_DIR/pjarczak_bambu_linux_host.runtime" ]; then
-        echo "Missing linux host runtime directory: $HOST_RUNTIME_DIR/pjarczak_bambu_linux_host.runtime"
+    if [ ! -f "$HOST_RUNTIME_DIR/pjarczak_bambu_linux_host_abi1" ]; then
+        echo "Missing linux host ABI1 runtime: $HOST_RUNTIME_DIR/pjarczak_bambu_linux_host_abi1"
+        exit 1
+    fi
+
+    if [ ! -f "$HOST_RUNTIME_DIR/pjarczak_bambu_linux_host_abi0" ]; then
+        echo "Missing linux host ABI0 runtime: $HOST_RUNTIME_DIR/pjarczak_bambu_linux_host_abi0"
         exit 1
     fi
 
@@ -155,9 +160,7 @@ copy_linux_bridge_runtime_to_app() {
     fi
 
     cp -f "$bridge_dylib" "$macos_dir/"
-    cp -f "$HOST_RUNTIME_DIR/pjarczak_bambu_linux_host" "$macos_dir/"
-    rm -rf "$macos_dir/pjarczak_bambu_linux_host.runtime"
-    cp -R "$HOST_RUNTIME_DIR/pjarczak_bambu_linux_host.runtime" "$macos_dir/"
+    find "$HOST_RUNTIME_DIR" -maxdepth 1 -type f -exec cp -f {} "$macos_dir/" \;
     cp -f "$HOST_WRAPPER" "$macos_dir/"
 
     chmod +x "$macos_dir/pjarczak_bambu_linux_host"

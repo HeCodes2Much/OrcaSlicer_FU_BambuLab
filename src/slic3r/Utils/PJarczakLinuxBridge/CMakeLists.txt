@@ -51,27 +51,45 @@ install(TARGETS pjarczak_bambu_networking_bridge
 )
 
 if (UNIX AND NOT APPLE AND EXISTS "${PJARCZAK_LINUX_HOST_DIR}/main.cpp" AND EXISTS "${PJARCZAK_LINUX_HOST_DIR}/LinuxPluginHost.cpp")
-    add_executable(pjarczak_bambu_linux_host
+    set(PJARCZAK_LINUX_HOST_COMMON_SOURCES
         ${PJARCZAK_LINUX_HOST_DIR}/main.cpp
         ${PJARCZAK_LINUX_HOST_DIR}/LinuxPluginHost.cpp
         ${CMAKE_CURRENT_LIST_DIR}/PJarczakLinuxBridgeConfig.cpp
         ${CMAKE_CURRENT_LIST_DIR}/PJarczakLinuxSoBridgeRpcProtocol.cpp
     )
-    target_include_directories(pjarczak_bambu_linux_host PRIVATE ${PJARCZAK_LINUX_BRIDGE_INCLUDE_DIRS})
-    target_compile_definitions(pjarczak_bambu_linux_host PRIVATE
-        PJARCZAK_LINUX_BRIDGE_STANDALONE_HOST=1
-        PJARCZAK_LINUX_BRIDGE_LIGHTWEIGHT_TASKS=1
-    )
+
     find_package(nlohmann_json CONFIG QUIET)
-    if (TARGET nlohmann_json::nlohmann_json)
-        target_link_libraries(pjarczak_bambu_linux_host PRIVATE nlohmann_json::nlohmann_json)
-    endif()
-    target_link_libraries(pjarczak_bambu_linux_host PRIVATE boost_headeronly boost_libs ${CMAKE_DL_LIBS} OpenSSL::Crypto)
-    target_link_options(pjarczak_bambu_linux_host PRIVATE -static-libstdc++ -static-libgcc)
-    set_target_properties(pjarczak_bambu_linux_host PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+
+    function(add_pjarczak_linux_host_variant target_name abi_value)
+        add_executable(${target_name}
+            ${PJARCZAK_LINUX_HOST_COMMON_SOURCES}
+        )
+        target_include_directories(${target_name} PRIVATE ${PJARCZAK_LINUX_BRIDGE_INCLUDE_DIRS})
+        target_compile_definitions(${target_name} PRIVATE
+            PJARCZAK_LINUX_BRIDGE_STANDALONE_HOST=1
+            PJARCZAK_LINUX_BRIDGE_LIGHTWEIGHT_TASKS=1
+            _GLIBCXX_USE_CXX11_ABI=${abi_value}
+        )
+        if (TARGET nlohmann_json::nlohmann_json)
+            target_link_libraries(${target_name} PRIVATE nlohmann_json::nlohmann_json)
+        endif()
+        target_link_libraries(${target_name} PRIVATE boost_headeronly ${CMAKE_DL_LIBS} OpenSSL::Crypto)
+        target_link_options(${target_name} PRIVATE -static-libstdc++ -static-libgcc)
+        set_target_properties(${target_name} PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
+        )
+    endfunction()
+
+    add_pjarczak_linux_host_variant(pjarczak_bambu_linux_host_abi1 1)
+    add_pjarczak_linux_host_variant(pjarczak_bambu_linux_host_abi0 0)
+
+    add_custom_target(pjarczak_bambu_linux_host
+        DEPENDS pjarczak_bambu_linux_host_abi1 pjarczak_bambu_linux_host_abi0
     )
-    install(TARGETS pjarczak_bambu_linux_host
+
+    install(TARGETS pjarczak_bambu_linux_host_abi1 pjarczak_bambu_linux_host_abi0
         RUNTIME DESTINATION "."
     )
 endif()
@@ -115,7 +133,6 @@ if (WIN32)
             $<TARGET_FILE_DIR:pjarczak_bambu_networking_bridge>/pjarczak_wsl_distro.txt
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${PJARCZAK_RUNTIME_ASSEMBLER_SOURCE}
-        ${PJARCZAK_PLUGIN_CACHE_SUBDIR_SOURCE}
             $<TARGET_FILE_DIR:pjarczak_bambu_networking_bridge>/assemble_windows_runtime_bundle.ps1
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${PJARCZAK_PLUGIN_CACHE_SUBDIR_SOURCE}

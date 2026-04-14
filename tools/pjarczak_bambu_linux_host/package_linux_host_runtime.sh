@@ -66,6 +66,12 @@ cp -f "$HOST_ABI1" "$RUNTIME_ROOT/pjarczak_bambu_linux_host_abi1"
 cp -f "$HOST_ABI0" "$RUNTIME_ROOT/pjarczak_bambu_linux_host_abi0"
 chmod +x "$RUNTIME_ROOT/pjarczak_bambu_linux_host" "$RUNTIME_ROOT/pjarczak_bambu_linux_host_abi1" "$RUNTIME_ROOT/pjarczak_bambu_linux_host_abi0"
 
+for extra in     "$PROJECT_DIR/cert/ca-certificates.crt"     "$PROJECT_DIR/cert/slicer_base64.cer"     "$PROJECT_DIR/resources/cert/ca-certificates.crt"     "$PROJECT_DIR/resources/cert/slicer_base64.cer"; do
+    if [[ -f "$extra" ]]; then
+        cp -f "$extra" "$RUNTIME_ROOT/$(basename -- "$extra")"
+    fi
+done
+
 copy_runtime_libs "$HOST_ABI1" "$HOST_ABI0"
 
 echo "linux host runtime packaged into:"

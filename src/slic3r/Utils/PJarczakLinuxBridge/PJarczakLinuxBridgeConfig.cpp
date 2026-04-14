@@ -236,13 +236,21 @@ bool is_overlay_runtime_filename(const std::string& file_name)
     return file_name == linux_payload_manifest_file_name() ||
            file_name == bridge_network_current_dir_name() ||
            file_name == host_executable_file_name() ||
+           file_name == "pjarczak_bambu_linux_host_abi1" ||
+           file_name == "pjarczak_bambu_linux_host_abi0" ||
            file_name == mac_host_wrapper_file_name() ||
            file_name == windows_wsl_distro_file_name() ||
            file_name == windows_wsl_import_script_file_name() ||
            file_name == windows_wsl_validate_script_file_name() ||
            file_name == windows_wsl_bootstrap_script_file_name() ||
+           file_name == "pjarczak-wsl-run-host.sh" ||
            file_name == windows_wsl_rootfs_file_name() ||
            file_name == windows_plugin_cache_subdir_file_name() ||
+           file_name == "ca-certificates.crt" ||
+           file_name == "slicer_base64.cer" ||
+           file_name == "install_runtime.cmd" ||
+           file_name == "assemble_windows_runtime_bundle.ps1" ||
+           file_name == "README_runtime_bridge.txt" ||
            is_linux_payload_filename(file_name);
 }
 
