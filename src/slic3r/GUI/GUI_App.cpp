@@ -245,6 +245,11 @@ std::string VersionInfo::convert_short_version(std::string full_version)
     return full_version;
 }
 
+static void pjarczak_verify_or_install_windows_bridge_runtime(const boost::filesystem::path& plugin_folder,
+                                                              const boost::filesystem::path& plugin_cache_dir);
+static long pjarczak_run_hidden_windows_command(const wxString& command, wxArrayString* stdout_lines, wxArrayString* stderr_lines);
+static void pjarczak_log_command_output(const char* tag, long exit_code, const wxArrayString& stdout_lines, const wxArrayString& stderr_lines);
+
 static std::string convert_studio_language_to_api(std::string lang_code)
 {
     boost::replace_all(lang_code, "_", "-");
@@ -3186,7 +3191,14 @@ static wxString pjarczak_quote_windows_arg(const wxString& value)
 static long pjarczak_run_hidden_windows_command(const wxString& command, wxArrayString* stdout_lines, wxArrayString* stderr_lines)
 {
 #ifdef WIN32
-    return wxExecute(command, stdout_lines, stderr_lines, wxEXEC_SYNC | wxEXEC_HIDE_CONSOLE);
+    wxArrayString local_stdout;
+    wxArrayString local_stderr;
+    long exit_code = wxExecute(command, local_stdout, local_stderr, wxEXEC_SYNC | wxEXEC_HIDE_CONSOLE);
+    if (stdout_lines)
+        *stdout_lines = local_stdout;
+    if (stderr_lines)
+        *stderr_lines = local_stderr;
+    return exit_code;
 #else
     (void)command;
     (void)stdout_lines;
