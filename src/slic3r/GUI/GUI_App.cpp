@@ -3314,21 +3314,16 @@ void pjarczak_copy_local_overlay_runtime(const boost::filesystem::path& plugin_f
         }
     } catch (...) {}
 
-    const auto runtime_src_dir = exe_dir / "pjarczak_bambu_linux_host.runtime";
-    const auto runtime_dst_dir = plugin_folder / "pjarczak_bambu_linux_host.runtime";
-    if (boost::filesystem::exists(runtime_src_dir) && boost::filesystem::is_directory(runtime_src_dir)) {
+    const auto legacy_runtime_dst_dir = plugin_folder / "pjarczak_bambu_linux_host.runtime";
+    if (boost::filesystem::exists(legacy_runtime_dst_dir) && boost::filesystem::is_directory(legacy_runtime_dst_dir)) {
         try {
-            if (boost::filesystem::exists(runtime_dst_dir))
-                boost::filesystem::remove_all(runtime_dst_dir);
-            copy_directory_recursively(runtime_src_dir, runtime_dst_dir);
+            boost::filesystem::remove_all(legacy_runtime_dst_dir);
         } catch (const std::exception& e) {
-            BOOST_LOG_TRIVIAL(error) << "[copy_network_if_available] copy runtime dir failed: "
-                                     << runtime_src_dir.string() << " -> "
-                                     << runtime_dst_dir.string() << ", err=" << e.what();
+            BOOST_LOG_TRIVIAL(error) << "[copy_network_if_available] remove legacy runtime dir failed: "
+                                     << legacy_runtime_dst_dir.string() << ", err=" << e.what();
         } catch (...) {
-            BOOST_LOG_TRIVIAL(error) << "[copy_network_if_available] copy runtime dir failed: "
-                                     << runtime_src_dir.string() << " -> "
-                                     << runtime_dst_dir.string() << ", unknown error";
+            BOOST_LOG_TRIVIAL(error) << "[copy_network_if_available] remove legacy runtime dir failed: "
+                                     << legacy_runtime_dst_dir.string() << ", unknown error";
         }
     }
 }

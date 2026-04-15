@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cctype>
 #include <filesystem>
+#include <boost/filesystem/path.hpp>
 #include <openssl/sha.h>
 #include <nlohmann/json.hpp>
 #include "../bambu_networking.hpp"
@@ -82,6 +83,12 @@ bool env_flag(const char* name, bool& value)
     return false;
 }
 
+
+
+std::filesystem::path to_std_path(const boost::filesystem::path& path)
+{
+    return std::filesystem::path(path.string());
+}
 
 const nlohmann::json* find_manifest_entry(const nlohmann::json& root, const std::string& file_name)
 {
@@ -165,6 +172,11 @@ std::string bridge_network_library_path(const std::filesystem::path& plugin_fold
 #else
     return (plugin_folder / linux_network_library_name()).string();
 #endif
+}
+
+std::string bridge_network_library_path(const boost::filesystem::path& plugin_folder)
+{
+    return bridge_network_library_path(to_std_path(plugin_folder));
 }
 
 std::string linux_network_library_name()
@@ -306,6 +318,11 @@ std::string linux_payload_manifest_path(const std::filesystem::path& plugin_fold
     return (plugin_folder / linux_payload_manifest_file_name()).string();
 }
 
+std::string linux_payload_manifest_path(const boost::filesystem::path& plugin_folder)
+{
+    return linux_payload_manifest_path(to_std_path(plugin_folder));
+}
+
 std::string sha256_file_hex(const std::string& file_path, std::string* reason)
 {
     std::ifstream in(file_path, std::ios::binary);
@@ -422,6 +439,11 @@ bool validate_linux_payload_set_against_manifest(const std::filesystem::path& pl
     }
     set_reason(reason, "ok");
     return true;
+}
+
+bool validate_linux_payload_set_against_manifest(const boost::filesystem::path& plugin_folder, std::string* reason)
+{
+    return validate_linux_payload_set_against_manifest(to_std_path(plugin_folder), reason);
 }
 
 bool validate_linux_payload_file(const std::string& file_path, std::string* reason)

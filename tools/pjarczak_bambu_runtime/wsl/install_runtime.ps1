@@ -160,7 +160,10 @@ if (-not $SkipCopyToPluginDir) {
         }
     }
 
-    Sync-Directory (Join-Path $PackageDir 'pjarczak_bambu_linux_host.runtime') (Join-Path $PluginDir 'pjarczak_bambu_linux_host.runtime')
+    $legacyRuntimeDir = Join-Path $PluginDir 'pjarczak_bambu_linux_host.runtime'
+    if (Test-Path $legacyRuntimeDir) {
+        Remove-Item -Recurse -Force $legacyRuntimeDir
+    }
     $PackageDir = $PluginDir
 
     Write-Host "Bridge package dir: $PackageDir"
