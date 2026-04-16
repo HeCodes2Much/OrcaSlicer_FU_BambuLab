@@ -106,6 +106,34 @@ function Invoke-NativeCapture([string]$FilePath, [string[]]$ArgumentList) {
     }
 }
 
+function Test-WslDistroExists([string]$WslPath, [string]$Name) {
+    $probe = Invoke-NativeCapture $WslPath @('-d', $Name, '--user', 'root', '--', 'sh', '-lc', 'true')
+    if ($probe.ExitCode -eq 0) {
+        return @{
+            Exists = $true
+            Reason = ''
+        }
+    }
+
+    $text = $probe.Combined
+    $lower = $text.ToLowerInvariant()
+
+    if ($lower.Contains('there is no distribution with the supplied name') -or
+        $lower.Contains('wsl_e_distribution_not_found') -or
+        ($lower.Contains('distribution') -and $lower.Contains('not') -and $lower.Contains('found'))) {
+        return @{
+            Exists = $false
+            Reason = "WSL distro '$Name' is not installed"
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        throw "Failed to start WSL distro '$Name'"
+    }
+
+    throw ("Failed to start WSL distro '{0}': {1}" -f $Name, $text)
+}
+
 if ([string]::IsNullOrWhiteSpace($PackageDir)) {
     $PackageDir = Get-ScriptDir
 }
@@ -171,25 +199,9 @@ if (!(Test-Path $wsl)) {
     throw 'wsl.exe not found'
 }
 
-$distroList = @()
-$normalizedDistros = @()
-for ($attempt = 0; $attempt -lt 10; $attempt++) {
-    $distroQuery = Invoke-NativeCapture $wsl @('-l', '-q')
-    if ($distroQuery.ExitCode -ne 0) {
-        throw "Failed to query installed WSL distros: $($distroQuery.Combined)"
-    }
-    $distroList = @()
-    if (-not [string]::IsNullOrWhiteSpace($distroQuery.StdOut)) {
-        $distroList = $distroQuery.StdOut -split "`n"
-    }
-    $normalizedDistros = $distroList | ForEach-Object { ($_ -replace "`0", '').Trim() } | Where-Object { $_ }
-    if ($normalizedDistros | Where-Object { $_ -eq $DistroName }) {
-        break
-    }
-    Start-Sleep -Milliseconds 400
-}
-if (-not ($normalizedDistros | Where-Object { $_ -eq $DistroName })) {
-    throw "WSL distro '$DistroName' is not installed"
+$distroStatus = Test-WslDistroExists $wsl $DistroName
+if (-not $distroStatus.Exists) {
+    throw $distroStatus.Reason
 }
 
 $packageDirWsl = To-WslPath $PackageDir

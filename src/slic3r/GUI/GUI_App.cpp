@@ -3711,60 +3711,59 @@ bool GUI_App::on_init_network(bool try_backup)
         if (!create_network_agent) {
             int result = Slic3r::NetworkAgent::unload_network_module();
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": unload_network_module after create_agent failure, result = " << result;
+        } else {
+            if (!m_device_manager)
+                m_device_manager = new Slic3r::DeviceManager(m_agent);
+            else
+                m_device_manager->set_agent(m_agent);
+
+            if (!m_user_manager)
+                m_user_manager = new Slic3r::UserManager(m_agent);
+            else
+                m_user_manager->set_agent(m_agent);
+
+            if (this->is_enable_multi_machine()) {
+                if (!m_task_manager) {
+                    m_task_manager = new Slic3r::TaskManager(m_agent);
+                    m_task_manager->start();
+                }
+
+                m_device_manager->EnableMultiMachine(true);
+            } else {
+                m_device_manager->EnableMultiMachine(false);
+            }
+
+            if (m_agent)
+                m_agent->set_config_dir(data_directory);
+
+            if (m_agent)
+                m_agent->init_log();
+
+            if (m_agent)
+                m_agent->set_cert_file(resources_dir() + "/cert", "slicer_base64.cer");
+
+            init_http_extra_header();
+
+            if (m_agent) {
+                init_networking_callbacks();
+                std::string country_code = app_config->get_country_code();
+                m_agent->set_country_code(country_code);
+                m_agent->start();
+            }
         }
-    }
-
-    if (!m_device_manager)
-        m_device_manager = new Slic3r::DeviceManager(m_agent);
-    else
-        m_device_manager->set_agent(m_agent);
-
-    if (!m_user_manager)
-        m_user_manager = new Slic3r::UserManager(m_agent);
-    else
-        m_user_manager->set_agent(m_agent);
-
-    if (this->is_enable_multi_machine()) {
-        if (!m_task_manager) {
-            m_task_manager = new Slic3r::TaskManager(m_agent);
-            m_task_manager->start();
-        }
-
-        m_device_manager->EnableMultiMachine(true);
     } else {
-        m_device_manager->EnableMultiMachine(false);
-    }
-
-    std::string data_directory = data_dir();
-
-    if (m_agent) {
-        m_agent->set_config_dir(data_directory);
-    }
-    if (m_agent) {
-        m_agent->init_log();
-    }
-
-    if (m_agent)
-        m_agent->set_cert_file(resources_dir() + "/cert", "slicer_base64.cer");
-
-    init_http_extra_header();
-
-    if (m_agent) {
-        init_networking_callbacks();
-        std::string country_code = app_config->get_country_code();
-        m_agent->set_country_code(country_code);
-        m_agent->start();
-    }
-
-    if (!should_load_networking_plugin) {
         int result = Slic3r::NetworkAgent::unload_network_module();
-        BOOST_LOG_TRIVIAL(info) << "on_init_network, unload_network_module, result = " << result;
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": on_init_network fallback, unload_network_module, result = " << result;
 
         if (!m_device_manager)
             m_device_manager = new Slic3r::DeviceManager();
+        else
+            m_device_manager->set_agent(nullptr);
 
         if (!m_user_manager)
             m_user_manager = new Slic3r::UserManager();
+        else
+            m_user_manager->set_agent(nullptr);
     }
 
     if (should_load_networking_plugin && m_networking_compatible && !NetworkAgent::use_legacy_network) {

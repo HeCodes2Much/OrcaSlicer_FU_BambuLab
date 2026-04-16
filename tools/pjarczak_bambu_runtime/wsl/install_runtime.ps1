@@ -114,6 +114,32 @@ function Resolve-PluginCacheDir([string]$Dir) {
     return [System.IO.Path]::GetFullPath((Join-Path $env:APPDATA 'OrcaSlicer\ota'))
 }
 
+function Test-WslDistroExists([string]$WslPath, [string]$Name, [ref]$Reason) {
+    $probe = & $WslPath -d $Name --user root -- sh -lc 'true' 2>&1
+    $code = $LASTEXITCODE
+
+    if ($code -eq 0) {
+        $Reason.Value = ''
+        return $true
+    }
+
+    $text = ($probe | Out-String).Trim()
+    $lower = $text.ToLowerInvariant()
+
+    if ($lower.Contains('there is no distribution with the supplied name') -or
+        $lower.Contains('wsl_e_distribution_not_found') -or
+        ($lower.Contains('distribution') -and $lower.Contains('not') -and $lower.Contains('found'))) {
+        $Reason.Value = "WSL distro '$Name' is not installed"
+        return $false
+    }
+
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        throw "Failed to start WSL distro '$Name'"
+    }
+
+    throw ("Failed to start WSL distro '{0}': {1}" -f $Name, $text)
+}
+
 $scriptDir = Get-ScriptDir
 $defaultPackageDir = $scriptDir
 if ([string]::IsNullOrWhiteSpace($PackageDir)) {
@@ -228,16 +254,12 @@ try {
 
 Convert-FileToLf $bootstrapPath
 
-$distroList = & $wsl -l -q 2>$null
-if ($LASTEXITCODE -ne 0) {
-    throw 'Failed to query installed WSL distros'
-}
-
 $rootFsTar = Join-Path $PackageDir 'windows-wsl2-rootfs.tar'
 $currentRootFsHash = Get-FileSha256 $rootFsTar
 $storedRootFsHash = Read-RootFsHashMarker $InstallDir
 
-$alreadyInstalled = $distroList | ForEach-Object { $_.Trim() } | Where-Object { $_ -eq $DistroName }
+$distroReason = ''
+$alreadyInstalled = Test-WslDistroExists $wsl $DistroName ([ref]$distroReason)
 if ($alreadyInstalled) {
     if (-not $ReplaceExisting) {
         if ([string]::IsNullOrWhiteSpace($storedRootFsHash) -or $storedRootFsHash -ne $currentRootFsHash) {
