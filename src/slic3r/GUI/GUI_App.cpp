@@ -1112,10 +1112,6 @@ GUI_App::GUI_App()
 	//app config initializes early becasuse it is used in instance checking in OrcaSlicer.cpp
     this->init_app_config();
     this->init_download_path();
-#if wxUSE_WEBVIEW_EDGE
-    this->init_webview_runtime();
-#endif
-
     reset_to_active();
 }
 
