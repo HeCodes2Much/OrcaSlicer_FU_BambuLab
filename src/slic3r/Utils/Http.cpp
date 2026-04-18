@@ -1,7 +1,5 @@
 #include "Http.hpp"
-#ifdef __WINDOWS__
 #include "PJarczakLinuxBridge/PJarczakLinuxBridgeConfig.hpp"
-#endif
 
 #include <cstdlib>
 #include <functional>
@@ -192,16 +190,12 @@ Http::priv::priv(const std::string &url)
     set_timeout_max(DEFAULT_TIMEOUT_MAX);
 	::curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, log_trace);
 	::curl_easy_setopt(curl, CURLOPT_URL, url.c_str());   // curl makes a copy internally
-	#if defined(__WINDOWS__)
-        if (Slic3r::PJarczakLinuxBridge::enabled()) {
-            const std::string pjarczak_user_agent = std::string("BambuStudio/") + Slic3r::PJarczakLinuxBridge::forced_client_version();
-            ::curl_easy_setopt(curl, CURLOPT_USERAGENT, pjarczak_user_agent.c_str());
-        } else {
-            ::curl_easy_setopt(curl, CURLOPT_USERAGENT, SLIC3R_APP_NAME "/" SoftFever_VERSION);
-        }
-#else
-        ::curl_easy_setopt(curl, CURLOPT_USERAGENT, SLIC3R_APP_NAME "/" SoftFever_VERSION);
+    std::string pjarczak_user_agent = SLIC3R_APP_NAME "/" SoftFever_VERSION;
+#if defined(__WINDOWS__)
+    if (Slic3r::PJarczakLinuxBridge::enabled())
+        pjarczak_user_agent = std::string("BambuStudio/") + Slic3r::PJarczakLinuxBridge::expected_network_abi_version();
 #endif
+	::curl_easy_setopt(curl, CURLOPT_USERAGENT, pjarczak_user_agent.c_str());
 	::curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, &error_buffer.front());
 #ifdef __WINDOWS__
 	::curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_MAX_TLSv1_2);

@@ -110,6 +110,50 @@ void host_log_json(const std::string& kind, const nlohmann::json& payload)
 }
 
 
+std::string windows_path_to_wsl(std::string path)
+{
+    if (path.empty())
+        return path;
+
+    if (path.rfind("\\\\?\\", 0) == 0)
+        path.erase(0, 4);
+
+    if (path.size() < 3)
+        return path;
+
+    const unsigned char drive = static_cast<unsigned char>(path[0]);
+    const bool drive_ok =
+        (drive >= 'A' && drive <= 'Z') ||
+        (drive >= 'a' && drive <= 'z');
+
+    if (!drive_ok || path[1] != ':' || (path[2] != '\\' && path[2] != '/'))
+        return path;
+
+    std::string out = "/mnt/";
+    out.push_back(static_cast<char>(std::tolower(drive)));
+    out.push_back('/');
+
+    for (std::size_t i = 3; i < path.size(); ++i)
+        out.push_back(path[i] == '\\' ? '/' : path[i]);
+
+    return out;
+}
+
+std::vector<std::string> windows_paths_to_wsl(std::vector<std::string> values)
+{
+    for (std::string& value : values)
+        value = windows_path_to_wsl(std::move(value));
+    return values;
+}
+
+void translate_print_params_paths(BBL::PrintParams& p)
+{
+    p.filename = windows_path_to_wsl(std::move(p.filename));
+    p.config_filename = windows_path_to_wsl(std::move(p.config_filename));
+    p.dst_file = windows_path_to_wsl(std::move(p.dst_file));
+}
+
+
 thread_local std::vector<unsigned char> g_thread_request_binary;
 thread_local std::vector<unsigned char> g_thread_reply_binary;
 
@@ -255,6 +299,7 @@ BBL::PrintParams print_params_from_json(const nlohmann::json& j)
     p.extruder_cali_manual_mode = j.value("extruder_cali_manual_mode", -1);
     p.task_ext_change_assist = j.value("task_ext_change_assist", false);
     p.try_emmc_print = j.value("try_emmc_print", false);
+    translate_print_params_paths(p);
     return p;
 }
 
@@ -810,15 +855,14 @@ nlohmann::json LinuxPluginHost::handle(const std::string& method, const nlohmann
     if (method == "net.set_config_dir") {
         auto f = net<int (*)(void*, std::string)>("bambu_network_set_config_dir");
         auto a = lookup_agent();
-        if (!f || !a) return not_supported(method);
         const std::string config_dir = windows_path_to_wsl(payload.value("config_dir", std::string()));
-        return nlohmann::json{{"ok", true}, {"value", f(a, config_dir)}};
+        return f && a ? nlohmann::json{{"ok", true}, {"value", f(a, config_dir)}} : not_supported(method);
     }
     if (method == "net.set_cert_file") {
         auto f = net<int (*)(void*, std::string, std::string)>("bambu_network_set_cert_file");
         auto a = lookup_agent();
         if (!f || !a) return not_supported(method);
-        const std::string folder = windows_path_to_wsl(payload.value("folder", std::string()));
+        const auto folder = windows_path_to_wsl(payload.value("folder", std::string()));
         const auto filename = payload.value("filename", std::string());
         const int ret = f(a, folder, filename);
         nlohmann::json r{{"ok", true}, {"value", ret}, {"folder", folder}, {"filename", filename}, {"ssl_cert_file", env_or("SSL_CERT_FILE", "")}, {"curl_ca_bundle", env_or("CURL_CA_BUNDLE", "")}};

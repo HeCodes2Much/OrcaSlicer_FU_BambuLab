@@ -1246,7 +1246,7 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
         auto headers = saved_headers;
         headers["X-BBL-OS-Type"] = Slic3r::PJarczakLinuxBridge::forced_download_os_type();
         headers["X-BBL-Client-Name"] = "BambuStudio";
-        headers["X-BBL-Client-Version"] = VersionInfo::convert_full_version(Slic3r::PJarczakLinuxBridge::forced_client_version());
+        headers["X-BBL-Client-Version"] = BAMBU_NETWORK_AGENT_VERSION;
         Slic3r::Http::set_extra_headers(headers);
         changed_headers = true;
     }
@@ -2381,18 +2381,16 @@ std::map<std::string, std::string> GUI_App::get_extra_header()
 {
     std::map<std::string, std::string> extra_headers;
     extra_headers.insert(std::make_pair("X-BBL-Client-Type", "slicer"));
-    extra_headers.insert(std::make_pair("X-BBL-Client-Name",
 #if defined(__WINDOWS__)
-        Slic3r::PJarczakLinuxBridge::enabled() ? std::string("BambuStudio") : std::string(SLIC3R_APP_NAME)
+    if (Slic3r::PJarczakLinuxBridge::enabled()) {
+        extra_headers.insert(std::make_pair("X-BBL-Client-Name", std::string("BambuStudio")));
+        extra_headers.insert(std::make_pair("X-BBL-Client-Version", std::string(BAMBU_NETWORK_AGENT_VERSION)));
+    } else {
+        extra_headers.insert(std::make_pair("X-BBL-Client-Name", std::string(SLIC3R_APP_NAME)));
+        extra_headers.insert(std::make_pair("X-BBL-Client-Version", VersionInfo::convert_full_version(SLIC3R_VERSION)));
+    }
 #else
-        std::string(SLIC3R_APP_NAME)
-#endif
-    ));
-#if defined(__WINDOWS__)
-    extra_headers.insert(std::make_pair("X-BBL-Client-Version",
-        Slic3r::PJarczakLinuxBridge::enabled() ? VersionInfo::convert_full_version(Slic3r::PJarczakLinuxBridge::forced_client_version()) : VersionInfo::convert_full_version(SLIC3R_VERSION)
-    ));
-#else
+    extra_headers.insert(std::make_pair("X-BBL-Client-Name", std::string(SLIC3R_APP_NAME)));
     extra_headers.insert(std::make_pair("X-BBL-Client-Version", VersionInfo::convert_full_version(SLIC3R_VERSION)));
 #endif
 #if defined(__WINDOWS__)

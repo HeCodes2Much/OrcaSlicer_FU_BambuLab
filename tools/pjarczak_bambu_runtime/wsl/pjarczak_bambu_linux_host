@@ -51,9 +51,11 @@ BIN=$(choose_bin) || {
     echo "no compatible host ABI variant found" >&2
     exit 127
 }
+
 if [ "${1:-}" = "--print-bin" ]; then
     printf '%s\n' "$BIN"
     exit 0
 fi
+
 export LD_LIBRARY_PATH="$DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 exec "$BIN" "$@"
