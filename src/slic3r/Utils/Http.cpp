@@ -1,5 +1,8 @@
 #include "Http.hpp"
+
+#ifdef __WINDOWS__
 #include "PJarczakLinuxBridge/PJarczakLinuxBridgeConfig.hpp"
+#endif
 
 #include <cstdlib>
 #include <functional>

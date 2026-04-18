@@ -1,6 +1,7 @@
 param(
     [string]$PackageDir = "",
     [string]$PluginDir = "",
+    [string]$PluginCacheDir = "",
     [string]$DistroName = "",
     [string]$InstallDir = "",
     [switch]$ReplaceExisting,

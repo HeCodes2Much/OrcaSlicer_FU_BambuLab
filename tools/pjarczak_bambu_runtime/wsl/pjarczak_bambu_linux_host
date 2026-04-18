@@ -7,7 +7,10 @@ CACHE_FILE="$DIR/.selected_host_abi"
 run_probe() {
     bin="$1"
     [ -x "$bin" ] || return 1
-    LD_LIBRARY_PATH="$DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"         PJARCZAK_BAMBU_PROBE_LOG_DIR="${PJARCZAK_BAMBU_PROBE_LOG_DIR:-$DIR}"         PJARCZAK_BAMBU_COUNTRY_CODE="${PJARCZAK_BAMBU_COUNTRY_CODE:-PL}"         "$bin" --probe-auth >/dev/null 2>&1
+    LD_LIBRARY_PATH="$DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    PJARCZAK_BAMBU_PROBE_LOG_DIR="${PJARCZAK_BAMBU_PROBE_LOG_DIR:-$DIR}" \
+    PJARCZAK_BAMBU_COUNTRY_CODE="${PJARCZAK_BAMBU_COUNTRY_CODE:-PL}" \
+    "$bin" --probe-auth >/dev/null 2>&1
 }
 
 choose_bin() {
