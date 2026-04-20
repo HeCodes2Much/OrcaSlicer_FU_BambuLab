@@ -39,7 +39,7 @@ static std::map<int, std::string> error_messages = {
 namespace Slic3r {
 namespace GUI {
 
-MediaPlayCtrl::MediaPlayCtrl(wxWindow *parent, wxMediaCtrl2 *media_ctrl, const wxPoint &pos, const wxSize &size)
+MediaPlayCtrl::MediaPlayCtrl(wxWindow *parent, BBLMediaCtrl *media_ctrl, const wxPoint &pos, const wxSize &size)
     : wxPanel(parent, wxID_ANY, pos, size)
     , m_media_ctrl(media_ctrl)
 {
@@ -833,21 +833,15 @@ bool MediaPlayCtrl::get_stream_url(std::string *url)
 
 }}
 
-void wxMediaCtrl2::DoSetSize(int x, int y, int width, int height, int sizeFlags)
+void wxMediaCtrl_OnSize(wxWindow * ctrl, wxSize const & videoSize, int width, int height)
 {
-#ifdef __WXMAC__
-    wxWindow::DoSetSize(x, y, width, height, sizeFlags);
-#else
-    wxMediaCtrl::DoSetSize(x, y, width, height, sizeFlags);
-#endif
-    if (sizeFlags & wxSIZE_USE_EXISTING) return;
-    wxSize size = m_video_size;
+    wxSize size = videoSize;
+    if (!size.IsFullySpecified()) size = {16, 9};
     int maxHeight = (width * size.GetHeight() + size.GetHeight() - 1) / size.GetWidth();
-    if (maxHeight != GetMaxHeight()) {
-        // BOOST_LOG_TRIVIAL(info) << "wxMediaCtrl2::DoSetSize: width: " << width << ", height: " << height << ", maxHeight: " << maxHeight;
-        SetMaxSize({-1, maxHeight});
-        CallAfter([this] {
-            if (auto p = GetParent()) {
+    if (maxHeight != ctrl->GetMaxHeight()) {
+        ctrl->SetMaxSize({-1, maxHeight});
+        ctrl->CallAfter([ctrl] {
+            if (auto p = ctrl->GetParent()) {
                 p->Layout();
                 p->Refresh();
             }

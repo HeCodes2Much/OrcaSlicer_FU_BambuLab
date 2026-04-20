@@ -210,12 +210,27 @@ int BBLNetworkPlugin::initialize(bool using_backup, const std::string& version)
         m_networking_module = dlopen(library.c_str(), RTLD_LAZY);
     } else {
     #if defined(__WXMAC__)
-        std::string lib_ext = ".dylib";
+        const std::string lib_ext = ".dylib";
     #else
-        std::string lib_ext = ".so";
+        const std::string lib_ext = ".so";
     #endif
         library = plugin_folder.string() + "/" + std::string("lib") + std::string(BAMBU_NETWORK_LIBRARY) + "_" + version + lib_ext;
         m_networking_module = dlopen(library.c_str(), RTLD_LAZY);
+
+        if (!m_networking_module) {
+            const std::string fallback_library = plugin_folder.string() + "/" + std::string("lib") + std::string(BAMBU_NETWORK_LIBRARY) + lib_ext;
+
+            if (boost::filesystem::exists(fallback_library)) {
+                BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": versioned plugin missing, trying fallback " << fallback_library;
+                dlerror();
+                m_networking_module = dlopen(fallback_library.c_str(), RTLD_LAZY);
+                if (m_networking_module) {
+                    library = fallback_library;
+                    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": loaded fallback network library " << fallback_library;
+                }
+            }
+        }
+
         if (!m_networking_module) {
             char* dll_error = dlerror();
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": dlopen failed: " << (dll_error ? dll_error : "unknown error");

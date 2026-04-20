@@ -1,7 +1,7 @@
 #include "wxMediaCtrl2.h"
-#include "libslic3r/Time.hpp"
 #include "I18N.hpp"
 #include "GUI_App.hpp"
+#include <wx/log.h>
 #include <boost/filesystem/operations.hpp>
 #ifdef __WIN32__
 #include <winuser.h>
@@ -222,6 +222,8 @@ void wxMediaCtrl2::Stop()
     wxMediaCtrl::Stop();
 }
 
+void wxMediaCtrl2::SetIdleImage(wxString const &image) {}
+
 #ifdef __LINUX__
 extern "C" int gst_bambu_last_error;
 #endif
@@ -253,6 +255,13 @@ wxSize wxMediaCtrl2::GetVideoSize() const
 wxSize wxMediaCtrl2::DoGetBestSize() const
 {
     return {-1, -1};
+}
+
+void wxMediaCtrl2::DoSetSize(int x, int y, int width, int height, int sizeFlags)
+{
+    wxMediaCtrl::DoSetSize(x, y, width, height, sizeFlags);
+    if (sizeFlags & wxSIZE_USE_EXISTING) return;
+    wxMediaCtrl_OnSize(this, m_video_size, width, height);
 }
 
 #ifdef __WIN32__

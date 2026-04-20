@@ -691,6 +691,10 @@ endif ()
 
 if (UNIX AND NOT APPLE)
     list(APPEND SLIC3R_GUI_SOURCES
+        GUI/AVVideoDecoder.cpp
+        GUI/AVVideoDecoder.hpp
+        GUI/wxMediaCtrl3.cpp
+        GUI/wxMediaCtrl3.h
         GUI/Printer/gstbambusrc.c
     )
 endif ()
@@ -817,6 +821,13 @@ if (UNIX AND NOT APPLE)
     if (wxHAVE_GDK_WAYLAND)
         target_compile_definitions(libslic3r_gui PRIVATE wxHAVE_GDK_WAYLAND)
     endif ()
+
+    pkg_check_modules(LIBAV REQUIRED IMPORTED_TARGET
+        libavcodec
+        libswscale
+        libavutil
+    )
+    target_link_libraries(libslic3r_gui PkgConfig::LIBAV)
 
     # We add GStreamer for bambu:/// support.
     pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0)
