@@ -39,7 +39,9 @@ std::uint16_t read_u16_le(const unsigned char* p)
 
 bool expected_machine_matches(std::uint16_t machine)
 {
-#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__APPLE__)
+    return machine == EM_X86_64 || machine == EM_AARCH64;
+#elif defined(__x86_64__) || defined(_M_X64)
     return machine == EM_X86_64;
 #elif defined(__aarch64__)
     return machine == EM_AARCH64;
@@ -204,6 +206,21 @@ std::string mac_host_wrapper_file_name()
     return "pjarczak-bambu-linux-host-wrapper";
 }
 
+std::string mac_lima_instance_file_name()
+{
+    return "pjarczak_lima_instance.txt";
+}
+
+std::string mac_runtime_install_script_file_name()
+{
+    return "install_runtime_macos.sh";
+}
+
+std::string mac_runtime_verify_script_file_name()
+{
+    return "verify_runtime_macos.sh";
+}
+
 std::string windows_wsl_distro_file_name()
 {
     return "pjarczak_wsl_distro.txt";
@@ -256,6 +273,9 @@ bool is_overlay_runtime_filename(const std::string& file_name)
            file_name == "pjarczak_bambu_linux_host_abi1" ||
            file_name == "pjarczak_bambu_linux_host_abi0" ||
            file_name == mac_host_wrapper_file_name() ||
+           file_name == mac_lima_instance_file_name() ||
+           file_name == mac_runtime_install_script_file_name() ||
+           file_name == mac_runtime_verify_script_file_name() ||
            file_name == windows_wsl_distro_file_name() ||
            file_name == windows_wsl_import_script_file_name() ||
            file_name == windows_wsl_validate_script_file_name() ||

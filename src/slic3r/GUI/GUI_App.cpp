@@ -247,6 +247,8 @@ std::string VersionInfo::convert_short_version(std::string full_version)
 
 static void pjarczak_verify_or_install_windows_bridge_runtime(const boost::filesystem::path& plugin_folder,
                                                               const boost::filesystem::path& plugin_cache_dir);
+static void pjarczak_verify_or_install_macos_bridge_runtime(const boost::filesystem::path& plugin_folder,
+                                                            const boost::filesystem::path& plugin_cache_dir);
 static long pjarczak_run_hidden_windows_command(const wxString& command, wxArrayString* stdout_lines, wxArrayString* stderr_lines);
 static void pjarczak_log_command_output(const char* tag, long exit_code, const wxArrayString& stdout_lines, const wxArrayString& stderr_lines);
 
@@ -2976,13 +2978,15 @@ bool GUI_App::on_init_inner()
         }
     } */
     copy_network_if_available();
-#ifdef WIN32
     if (Slic3r::PJarczakLinuxBridge::enabled()) {
         const boost::filesystem::path plugin_folder = boost::filesystem::path(data_dir()) / "plugins";
         const boost::filesystem::path plugin_cache_dir = boost::filesystem::path(data_dir()) / "ota" / "plugins";
+#ifdef WIN32
         pjarczak_verify_or_install_windows_bridge_runtime(plugin_folder, plugin_cache_dir);
-    }
+#elif defined(__APPLE__) || defined(__WXMAC__)
+        pjarczak_verify_or_install_macos_bridge_runtime(plugin_folder, plugin_cache_dir);
 #endif
+    }
     on_init_network();
 
     if (m_agent && m_agent->is_user_login()) {
@@ -3180,12 +3184,44 @@ static wxString pjarczak_quote_windows_arg(const wxString& value)
     return wxString::Format("\"%s\"", escaped);
 }
 
+static wxString pjarczak_quote_posix_arg(const wxString& value)
+{
+    wxString out("'");
+    for (wxUniChar ch : value) {
+        if (ch == '\'')
+            out += "'\\''";
+        else
+            out += ch;
+    }
+    out += "'";
+    return out;
+}
+
 static long pjarczak_run_hidden_windows_command(const wxString& command, wxArrayString* stdout_lines, wxArrayString* stderr_lines)
 {
 #ifdef WIN32
     wxArrayString local_stdout;
     wxArrayString local_stderr;
     long exit_code = wxExecute(command, local_stdout, local_stderr, wxEXEC_SYNC | wxEXEC_HIDE_CONSOLE);
+    if (stdout_lines)
+        *stdout_lines = local_stdout;
+    if (stderr_lines)
+        *stderr_lines = local_stderr;
+    return exit_code;
+#else
+    (void)command;
+    (void)stdout_lines;
+    (void)stderr_lines;
+    return -1;
+#endif
+}
+
+static long pjarczak_run_hidden_posix_command(const wxString& command, wxArrayString* stdout_lines, wxArrayString* stderr_lines)
+{
+#if defined(__WXMAC__) || defined(__APPLE__) || defined(__WXGTK__)
+    wxArrayString local_stdout;
+    wxArrayString local_stderr;
+    long exit_code = wxExecute(command, local_stdout, local_stderr, wxEXEC_SYNC);
     if (stdout_lines)
         *stdout_lines = local_stdout;
     if (stderr_lines)
@@ -3259,6 +3295,66 @@ static void pjarczak_verify_or_install_windows_bridge_runtime(const boost::files
 #endif
 }
 
+static void pjarczak_verify_or_install_macos_bridge_runtime(const boost::filesystem::path& plugin_folder,
+                                                            const boost::filesystem::path& plugin_cache_dir)
+{
+#if !(defined(__WXMAC__) || defined(__APPLE__))
+    (void)plugin_folder;
+    (void)plugin_cache_dir;
+#else
+    if (!Slic3r::PJarczakLinuxBridge::enabled())
+        return;
+
+    const auto verify_script = plugin_folder / Slic3r::PJarczakLinuxBridge::mac_runtime_verify_script_file_name();
+    const auto install_script = plugin_folder / Slic3r::PJarczakLinuxBridge::mac_runtime_install_script_file_name();
+    if (!boost::filesystem::exists(verify_script) || !boost::filesystem::exists(install_script)) {
+        BOOST_LOG_TRIVIAL(warning) << "[pjarczak_runtime_setup] missing macOS verify/install script in " << plugin_folder.string();
+        return;
+    }
+
+    const wxString plugin_dir_wx = from_u8(plugin_folder.string());
+    const wxString cache_dir_wx = from_u8(plugin_cache_dir.string());
+    const wxString verify_cmd = wxString::Format(
+        "/bin/bash %s -PackageDir %s -PluginDir %s -PluginCacheDir %s -AllowMissingLinuxPlugin",
+        pjarczak_quote_posix_arg(from_u8(verify_script.string())),
+        pjarczak_quote_posix_arg(plugin_dir_wx),
+        pjarczak_quote_posix_arg(plugin_dir_wx),
+        pjarczak_quote_posix_arg(cache_dir_wx));
+
+    wxArrayString verify_out;
+    wxArrayString verify_err;
+    long verify_code = pjarczak_run_hidden_posix_command(verify_cmd, &verify_out, &verify_err);
+    pjarczak_log_command_output("[pjarczak_runtime_verify_macos]", verify_code, verify_out, verify_err);
+    if (verify_code == 0)
+        return;
+
+    wxMessageDialog prompt(
+        nullptr,
+        _L("The macOS Linux bridge runtime is not ready. OrcaSlicer can install or repair the bundled Lima runtime now."),
+        _L("OrcaSlicer Linux Bridge"),
+        wxYES_NO | wxICON_QUESTION | wxCENTRE);
+    if (prompt.ShowModal() != wxID_YES)
+        return;
+
+    const wxString install_cmd = wxString::Format(
+        "/bin/bash %s -PackageDir %s -PluginDir %s -PluginCacheDir %s -ReplaceExisting",
+        pjarczak_quote_posix_arg(from_u8(install_script.string())),
+        pjarczak_quote_posix_arg(plugin_dir_wx),
+        pjarczak_quote_posix_arg(plugin_dir_wx),
+        pjarczak_quote_posix_arg(cache_dir_wx));
+
+    wxArrayString install_out;
+    wxArrayString install_err;
+    long install_code = pjarczak_run_hidden_posix_command(install_cmd, &install_out, &install_err);
+    pjarczak_log_command_output("[pjarczak_runtime_install_macos]", install_code, install_out, install_err);
+
+    verify_out.clear();
+    verify_err.clear();
+    verify_code = pjarczak_run_hidden_posix_command(verify_cmd, &verify_out, &verify_err);
+    pjarczak_log_command_output("[pjarczak_runtime_verify_after_install_macos]", verify_code, verify_out, verify_err);
+#endif
+}
+
 bool pjarczak_bridge_payload_ready(const boost::filesystem::path& plugin_folder, std::string* reason)
 {
     if (!Slic3r::PJarczakLinuxBridge::enabled()) {
@@ -3271,6 +3367,22 @@ bool pjarczak_bridge_payload_ready(const boost::filesystem::path& plugin_folder,
         return boost::filesystem::exists(candidate) && !boost::filesystem::is_directory(candidate);
     };
 
+#if defined(__WXMAC__) || defined(__APPLE__)
+    const std::string required_files[] = {
+        Slic3r::PJarczakLinuxBridge::bridge_network_current_dir_name(),
+        Slic3r::PJarczakLinuxBridge::host_executable_file_name(),
+        std::string("pjarczak_bambu_linux_host_abi1"),
+        std::string("pjarczak_bambu_linux_host_abi0"),
+        Slic3r::PJarczakLinuxBridge::mac_host_wrapper_file_name(),
+        Slic3r::PJarczakLinuxBridge::mac_runtime_install_script_file_name(),
+        Slic3r::PJarczakLinuxBridge::mac_runtime_verify_script_file_name(),
+        Slic3r::PJarczakLinuxBridge::mac_lima_instance_file_name(),
+        Slic3r::PJarczakLinuxBridge::linux_network_library_name(),
+        Slic3r::PJarczakLinuxBridge::linux_source_library_name(),
+        std::string("ca-certificates.crt"),
+        std::string("slicer_base64.cer")
+    };
+#else
     const std::string required_files[] = {
         Slic3r::PJarczakLinuxBridge::bridge_network_current_dir_name(),
         Slic3r::PJarczakLinuxBridge::host_executable_file_name(),
@@ -3285,6 +3397,7 @@ bool pjarczak_bridge_payload_ready(const boost::filesystem::path& plugin_folder,
         std::string("ca-certificates.crt"),
         std::string("slicer_base64.cer")
     };
+#endif
 
     for (const std::string& file_name : required_files) {
         if (!has_file(file_name)) {
@@ -3292,7 +3405,7 @@ bool pjarczak_bridge_payload_ready(const boost::filesystem::path& plugin_folder,
             return false;
         }
     }
-
+#if !(defined(__WXMAC__) || defined(__APPLE__))
     if (!has_file(Slic3r::PJarczakLinuxBridge::windows_wsl_import_script_file_name()) &&
         !has_file("pjarczak-install-wsl-runtime.ps1")) {
         pjarczak_set_reason(reason, "missing required runtime file: " + Slic3r::PJarczakLinuxBridge::windows_wsl_import_script_file_name());
@@ -3304,6 +3417,7 @@ bool pjarczak_bridge_payload_ready(const boost::filesystem::path& plugin_folder,
         pjarczak_set_reason(reason, "missing required runtime file: " + Slic3r::PJarczakLinuxBridge::windows_wsl_bootstrap_script_file_name());
         return false;
     }
+#endif
 
     for (const std::string& file_name : {
             Slic3r::PJarczakLinuxBridge::linux_network_library_name(),

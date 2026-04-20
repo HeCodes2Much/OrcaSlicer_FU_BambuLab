@@ -834,6 +834,10 @@ function(orcaslicer_copy_dlls target config postfix output_dlls)
             ${CMAKE_PREFIX_PATH}/bin/occt/TKXDESTEP.dll
             ${CMAKE_PREFIX_PATH}/bin/occt/TKXSBase.dll
             ${CMAKE_PREFIX_PATH}/bin/freetype.dll
+            ${CMAKE_PREFIX_PATH}/bin/avcodec-61.dll
+            ${CMAKE_PREFIX_PATH}/bin/swresample-5.dll
+            ${CMAKE_PREFIX_PATH}/bin/swscale-8.dll
+            ${CMAKE_PREFIX_PATH}/bin/avutil-59.dll
          DESTINATION ${_out_dir})
 
     set(${output_dlls}
@@ -869,6 +873,10 @@ function(orcaslicer_copy_dlls target config postfix output_dlls)
         ${_out_dir}/TKXSBase.dll
 
         ${_out_dir}/freetype.dll
+        ${_out_dir}/avcodec-61.dll
+        ${_out_dir}/swresample-5.dll
+        ${_out_dir}/swscale-8.dll
+        ${_out_dir}/avutil-59.dll
 
         PARENT_SCOPE
     )

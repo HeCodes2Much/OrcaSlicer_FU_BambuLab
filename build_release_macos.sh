@@ -100,7 +100,7 @@ if [ -z "$CMAKE_IGNORE_PREFIX_PATH" ]; then
   export CMAKE_IGNORE_PREFIX_PATH="/opt/local:/usr/local:/opt/homebrew"
 fi
 
-CMAKE_VERSION=$(cmake --version | head -1 | sed 's/[^0-9]*\([0-9]*\).*//')
+CMAKE_VERSION=$(cmake --version | head -1 | sed -E 's/[^0-9]*([0-9]+).*/\1/')
 if [ "$CMAKE_VERSION" -ge 4 ] 2>/dev/null; then
   export CMAKE_POLICY_VERSION_MINIMUM=3.5
   export CMAKE_POLICY_COMPAT="-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
@@ -123,6 +123,7 @@ PROJECT_BUILD_DIR="$PROJECT_DIR/build/$ARCH"
 DEPS_DIR="$PROJECT_DIR/deps"
 HOST_RUNTIME_DIR="$PROJECT_DIR/tools/pjarczak_bambu_linux_host/runtime/linux-x86_64"
 HOST_WRAPPER="$PROJECT_DIR/tools/pjarczak_bambu_linux_host/pjarczak-bambu-linux-host-wrapper"
+MAC_RUNTIME_HELPERS_DIR="$PROJECT_DIR/tools/pjarczak_bambu_runtime/macos"
 
 export BUILD_DIR_CONFIG_SUBDIR="/$BUILD_CONFIG"
 
@@ -154,6 +155,21 @@ copy_linux_bridge_runtime_to_app() {
         exit 1
     fi
 
+    if [ ! -f "$MAC_RUNTIME_HELPERS_DIR/pjarczak_install_macos_runtime.sh" ]; then
+        echo "Missing mac runtime installer: $MAC_RUNTIME_HELPERS_DIR/pjarczak_install_macos_runtime.sh"
+        exit 1
+    fi
+
+    if [ ! -f "$MAC_RUNTIME_HELPERS_DIR/pjarczak_verify_macos_runtime.sh" ]; then
+        echo "Missing mac runtime verifier: $MAC_RUNTIME_HELPERS_DIR/pjarczak_verify_macos_runtime.sh"
+        exit 1
+    fi
+
+    if [ ! -f "$MAC_RUNTIME_HELPERS_DIR/pjarczak_lima_instance.txt" ]; then
+        echo "Missing Lima instance file: $MAC_RUNTIME_HELPERS_DIR/pjarczak_lima_instance.txt"
+        exit 1
+    fi
+
     if [ ! -f "$bridge_dylib" ]; then
         echo "Missing installed bridge dylib: $bridge_dylib"
         exit 1
@@ -162,9 +178,17 @@ copy_linux_bridge_runtime_to_app() {
     cp -f "$bridge_dylib" "$macos_dir/"
     find "$HOST_RUNTIME_DIR" -maxdepth 1 -type f -exec cp -f {} "$macos_dir/" \;
     cp -f "$HOST_WRAPPER" "$macos_dir/"
+    cp -f "$MAC_RUNTIME_HELPERS_DIR/pjarczak_install_macos_runtime.sh" "$macos_dir/install_runtime_macos.sh"
+    cp -f "$MAC_RUNTIME_HELPERS_DIR/pjarczak_verify_macos_runtime.sh" "$macos_dir/verify_runtime_macos.sh"
+    cp -f "$MAC_RUNTIME_HELPERS_DIR/pjarczak_lima_instance.txt" "$macos_dir/"
+    if [ -f "$MAC_RUNTIME_HELPERS_DIR/README_runtime_bridge.txt" ]; then
+        cp -f "$MAC_RUNTIME_HELPERS_DIR/README_runtime_bridge.txt" "$macos_dir/"
+    fi
 
     chmod +x "$macos_dir/pjarczak_bambu_linux_host"
     chmod +x "$macos_dir/pjarczak-bambu-linux-host-wrapper"
+    chmod +x "$macos_dir/install_runtime_macos.sh"
+    chmod +x "$macos_dir/verify_runtime_macos.sh"
 }
 
 build_deps() {

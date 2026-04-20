@@ -8,13 +8,8 @@
 #ifndef MediaPlayCtrl_h
 #define MediaPlayCtrl_h
 
-#if defined(__linux__) && !defined(__APPLE__)
 #include "wxMediaCtrl3.h"
 using BBLMediaCtrl = wxMediaCtrl3;
-#else
-#include "wxMediaCtrl2.h"
-using BBLMediaCtrl = wxMediaCtrl2;
-#endif
 
 #include <wx/panel.h>
 

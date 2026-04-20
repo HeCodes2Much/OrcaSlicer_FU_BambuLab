@@ -95,15 +95,47 @@ if (UNIX AND NOT APPLE AND EXISTS "${PJARCZAK_LINUX_HOST_DIR}/main.cpp" AND EXIS
 endif()
 
 if (APPLE)
-    set(PJARCZAK_MAC_WRAPPER_SCRIPT_SOURCE ${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_macos_linux_wrapper/pjarczak_bambu_macos_linux_wrapper.sh)
+    set(PJARCZAK_MAC_WRAPPER_SCRIPT_SOURCE ${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_linux_host/pjarczak-bambu-linux-host-wrapper)
+    set(PJARCZAK_MAC_INSTALLER_SOURCE ${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_runtime/macos/pjarczak_install_macos_runtime.sh)
+    set(PJARCZAK_MAC_VERIFY_SOURCE ${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_runtime/macos/pjarczak_verify_macos_runtime.sh)
+    set(PJARCZAK_MAC_INSTANCE_SOURCE ${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_runtime/macos/pjarczak_lima_instance.txt)
+    set(PJARCZAK_MAC_README_SOURCE ${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_runtime/macos/README_runtime_bridge.txt)
     add_custom_command(TARGET pjarczak_bambu_networking_bridge POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${PJARCZAK_MAC_WRAPPER_SCRIPT_SOURCE}
-            $<TARGET_FILE_DIR:pjarczak_bambu_networking_bridge>/pjarczak_bambu_macos_linux_wrapper.sh
+            $<TARGET_FILE_DIR:pjarczak_bambu_networking_bridge>/pjarczak-bambu-linux-host-wrapper
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${PJARCZAK_MAC_INSTALLER_SOURCE}
+            $<TARGET_FILE_DIR:pjarczak_bambu_networking_bridge>/install_runtime_macos.sh
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${PJARCZAK_MAC_VERIFY_SOURCE}
+            $<TARGET_FILE_DIR:pjarczak_bambu_networking_bridge>/verify_runtime_macos.sh
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${PJARCZAK_MAC_INSTANCE_SOURCE}
+            $<TARGET_FILE_DIR:pjarczak_bambu_networking_bridge>/pjarczak_lima_instance.txt
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${PJARCZAK_MAC_README_SOURCE}
+            $<TARGET_FILE_DIR:pjarczak_bambu_networking_bridge>/README_runtime_bridge.txt
     )
     install(FILES ${PJARCZAK_MAC_WRAPPER_SCRIPT_SOURCE}
         DESTINATION "."
-        RENAME pjarczak_bambu_macos_linux_wrapper.sh
+        RENAME pjarczak-bambu-linux-host-wrapper
+    )
+    install(FILES ${PJARCZAK_MAC_INSTALLER_SOURCE}
+        DESTINATION "."
+        RENAME install_runtime_macos.sh
+    )
+    install(FILES ${PJARCZAK_MAC_VERIFY_SOURCE}
+        DESTINATION "."
+        RENAME verify_runtime_macos.sh
+    )
+    install(FILES ${PJARCZAK_MAC_INSTANCE_SOURCE}
+        DESTINATION "."
+        RENAME pjarczak_lima_instance.txt
+    )
+    install(FILES ${PJARCZAK_MAC_README_SOURCE}
+        DESTINATION "."
+        RENAME README_runtime_bridge.txt
     )
 endif()
 

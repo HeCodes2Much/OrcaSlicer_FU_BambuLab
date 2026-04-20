@@ -121,7 +121,7 @@ ZUserLogin::ZUserLogin() : wxDialog((wxWindow *) (wxGetApp().mainframe), wxID_AN
         CentreOnParent();
     }
     else {
-#ifdef WIN32
+#if defined(WIN32) || defined(__APPLE__) || defined(__WXMAC__)
         if (Slic3r::PJarczakLinuxBridge::enabled()) {
             m_external_browser_mode = true;
             SetTitle(_L("Login"));
@@ -187,7 +187,7 @@ ZUserLogin::ZUserLogin() : wxDialog((wxWindow *) (wxGetApp().mainframe), wxID_AN
         int MaxY = (screenheight - pSize.y) > 0 ? (screenheight - pSize.y) / 2 : 0;
         wxPoint tmpPT((screenwidth - pSize.x) / 2, MaxY);
         Move(tmpPT);
-#ifdef WIN32
+#if defined(WIN32) || defined(__APPLE__) || defined(__WXMAC__)
         }
 #endif
     }
@@ -215,7 +215,7 @@ bool ZUserLogin::run() {
     m_timer = new wxTimer(this, NETWORK_OFFLINE_TIMER_ID);
     m_timer->Start(m_external_browser_mode ? 30000 : 8000);
 
-#ifdef WIN32
+#if defined(WIN32) || defined(__APPLE__) || defined(__WXMAC__)
     if (m_external_browser_mode) {
         NetworkAgent* agent = wxGetApp().getAgent();
         if (agent) {
