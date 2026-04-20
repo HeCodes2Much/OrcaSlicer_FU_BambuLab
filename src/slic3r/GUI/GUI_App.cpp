@@ -3504,7 +3504,6 @@ void pjarczak_copy_local_overlay_runtime(const boost::filesystem::path& plugin_f
         Slic3r::PJarczakLinuxBridge::windows_wsl_rootfs_file_name(),
         Slic3r::PJarczakLinuxBridge::windows_plugin_cache_subdir_file_name(),
         "install_runtime.cmd",
-        "README_runtime_bridge.txt",
         "assemble_windows_runtime_bundle.ps1"
     };
 

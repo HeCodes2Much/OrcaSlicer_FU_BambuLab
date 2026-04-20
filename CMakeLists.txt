@@ -885,8 +885,8 @@ endfunction()
 
 function(orcaslicer_copy_sos target config postfix output_sos)
 
-    set(_out_dir "${CMAKE_CURRENT_BINARY_DIR}/src")
-    message(STATUS "set out_dir to CMAKE_CURRENT_BINARY_DIR/src: ${_out_dir}")
+    set(_out_dir "${CMAKE_CURRENT_BINARY_DIR}")
+    message(STATUS "set out_dir to CMAKE_CURRENT_BINARY_DIR: ${_out_dir}")
 
     if (EXISTS "/usr/lib/aarch64-linux-gnu/libavcodec.so")
         file(COPY /usr/lib/aarch64-linux-gnu/libavcodec.so

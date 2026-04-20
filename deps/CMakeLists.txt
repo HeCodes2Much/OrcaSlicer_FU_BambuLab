@@ -383,7 +383,7 @@ if(NOT FREETYPE_FOUND)
 endif()
 
 set(FFMPEG_PKG "")
-if (MSVC)
+if (MSVC OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     include(FFMPEG/FFMPEG.cmake)
     set(FFMPEG_PKG "dep_FFMPEG")
 endif()

@@ -287,7 +287,6 @@ bool is_overlay_runtime_filename(const std::string& file_name)
            file_name == "slicer_base64.cer" ||
            file_name == "install_runtime.cmd" ||
            file_name == "assemble_windows_runtime_bundle.ps1" ||
-           file_name == "README_runtime_bridge.txt" ||
            is_linux_payload_filename(file_name);
 }
 
