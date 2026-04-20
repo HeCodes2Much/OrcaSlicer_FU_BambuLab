@@ -5177,6 +5177,17 @@ void GUI_App::handle_script_message(std::string msg)
                     }
                 }
             }
+            if (cmd == "user_ticket_login") {
+                std::string ticket = j["data"]["ticket"];
+                TicketLoginTask::perform_async(ticket, [this](std::string login_info) {
+                    if (m_agent && !login_info.empty()) {
+                        m_agent->change_user(login_info);
+                        if (m_agent->is_user_login()) {
+                            request_user_login(1);
+                        }
+                    }
+                });
+            }
         }
     }
     catch (...) {

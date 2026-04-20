@@ -50,7 +50,8 @@ trim_file() {
     if [[ ! -f "$path" ]]; then
         return 1
     fi
-    LC_ALL=C tr -d '' < "$path" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+    LC_ALL=C tr -d '
+' < "$path" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
 find_limactl() {
@@ -191,7 +192,7 @@ ensure_lima_installed
 maybe_install_rosetta
 copy_runtime_payload "$PLUGIN_DIR" "$RUNTIME_DIR"
 
-START_ARGS=(start "--name=${INSTANCE}" --mount-writable)
+START_ARGS=(start "--name=${INSTANCE}" --tty=false --mount-writable)
 MACOS_MAJOR=$(sw_vers -productVersion | awk -F. '{print $1}')
 if [[ "$MACOS_MAJOR" -ge 13 ]]; then
     START_ARGS+=(--vm-type=vz --network=vzNAT)

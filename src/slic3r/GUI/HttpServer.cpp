@@ -64,6 +64,63 @@ json build_canonical_login_payload(const json& token_j, const json& profile_j)
     return out;
 }
 
+
+std::string TicketLoginTask::perform_sync(const std::string& ticket)
+{
+    auto login_info = do_request_login_info(ticket);
+    if (login_info.has_value())
+        return login_info.value();
+
+    return std::string();
+}
+
+void TicketLoginTask::perform_async(const std::string& ticket, std::function<void(std::string)> cb)
+{
+    boost::thread([cb = std::move(cb), ticket]() {
+        auto login_info = do_request_login_info(ticket);
+        GUI::wxGetApp().CallAfter([cb, login_info = std::move(login_info)]() mutable {
+            cb(login_info ? *login_info : std::string());
+        });
+    }).detach();
+}
+
+std::optional<std::string> TicketLoginTask::do_request_login_info(const std::string& ticket)
+{
+    NetworkAgent* agent = wxGetApp().getAgent();
+    if (!agent)
+        return std::nullopt;
+
+    unsigned int token_http_code = 0;
+    std::string token_http_body;
+    if (agent->get_my_token(ticket, &token_http_code, &token_http_body) < 0)
+        return std::nullopt;
+
+    json token_j;
+    try {
+        token_j = json::parse(token_http_body);
+    } catch (...) {
+        return std::nullopt;
+    }
+
+    const std::string access_token = json_string_first(token_j, {"accessToken", "access_token", "token"});
+    if (access_token.empty())
+        return std::nullopt;
+
+    unsigned int profile_http_code = 0;
+    std::string profile_http_body;
+    if (agent->get_my_profile(access_token, &profile_http_code, &profile_http_body) < 0)
+        return std::nullopt;
+
+    json profile_j;
+    try {
+        profile_j = json::parse(profile_http_body);
+    } catch (...) {
+        return std::nullopt;
+    }
+
+    return build_canonical_login_payload(token_j, profile_j).dump();
+}
+
 void session::start()
 {
     read_first_line();

@@ -404,7 +404,7 @@ void ZUserLogin::OnScriptMessage(wxWebViewEvent &evt)
         {
             m_AutotestToken = j["data"]["token"];
         }
-        if (strCmd == "user_login") {
+        if (strCmd == "user_login" || strCmd == "user_ticket_login") {
             j["data"]["autotest_token"] = m_AutotestToken;
             std::string message_json = j.dump();
 

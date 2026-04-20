@@ -14,11 +14,20 @@
 #include <set>
 #include <memory>
 #include <utility>
+#include <optional>
 
 #define LOCALHOST_PORT      13618
 #define LOCALHOST_URL       "http://localhost:"
 
 namespace Slic3r { namespace GUI {
+
+class TicketLoginTask {
+public:
+    static std::string perform_sync(const std::string& ticket);
+    static void perform_async(const std::string& ticket, std::function<void(std::string)> cb);
+private:
+    static std::optional<std::string> do_request_login_info(const std::string& ticket);
+};
 
 class session;
 

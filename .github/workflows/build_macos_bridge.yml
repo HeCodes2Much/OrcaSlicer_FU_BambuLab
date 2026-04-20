@@ -93,7 +93,7 @@ jobs:
       - name: Install mac tools
         shell: bash
         run: |
-          brew install libtool
+          brew install autoconf automake texinfo libtool nasm yasm x264
           mkdir -p "$GITHUB_WORKSPACE/deps/build/arm64"
 
       - name: Build macOS arm64 deps
@@ -152,7 +152,7 @@ jobs:
       - name: Install mac tools
         shell: bash
         run: |
-          brew install libtool
+          brew install autoconf automake texinfo libtool nasm yasm x264
           mkdir -p "$GITHUB_WORKSPACE/deps/build/x86_64"
 
       - name: Build macOS x86_64 deps
