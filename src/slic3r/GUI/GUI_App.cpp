@@ -1234,6 +1234,11 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
     tmp_path += format(".%1%%2%", get_current_pid(), ".tmp");
 
     const bool pj_force_linux_payload = Slic3r::PJarczakLinuxBridge::should_force_linux_plugin_payload(name);
+#if defined(__LINUX__)
+    const bool pj_force_bambustudio_headers = pj_force_linux_payload || name == "plugins";
+#else
+    const bool pj_force_bambustudio_headers = pj_force_linux_payload;
+#endif
     std::map<std::string, std::string> saved_headers = Slic3r::Http::get_extra_headers();
     bool changed_headers = false;
 
@@ -1244,7 +1249,7 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
         }
     };
 
-    if (pj_force_linux_payload) {
+    if (pj_force_bambustudio_headers) {
         auto headers = saved_headers;
         headers["X-BBL-OS-Type"] = Slic3r::PJarczakLinuxBridge::forced_download_os_type();
         headers["X-BBL-Client-Name"] = "BambuStudio";
@@ -2383,18 +2388,21 @@ std::map<std::string, std::string> GUI_App::get_extra_header()
 {
     std::map<std::string, std::string> extra_headers;
     extra_headers.insert(std::make_pair("X-BBL-Client-Type", "slicer"));
+
+    bool use_bambustudio_identity = false;
 #if defined(__WINDOWS__)
-    if (Slic3r::PJarczakLinuxBridge::enabled()) {
+    use_bambustudio_identity = Slic3r::PJarczakLinuxBridge::enabled();
+#elif defined(__LINUX__)
+    use_bambustudio_identity = true;
+#endif
+
+    if (use_bambustudio_identity) {
         extra_headers.insert(std::make_pair("X-BBL-Client-Name", std::string("BambuStudio")));
         extra_headers.insert(std::make_pair("X-BBL-Client-Version", std::string(Slic3r::PJarczakLinuxBridge::forced_client_version())));
     } else {
         extra_headers.insert(std::make_pair("X-BBL-Client-Name", std::string(SLIC3R_APP_NAME)));
         extra_headers.insert(std::make_pair("X-BBL-Client-Version", VersionInfo::convert_full_version(SLIC3R_VERSION)));
     }
-#else
-    extra_headers.insert(std::make_pair("X-BBL-Client-Name", std::string(SLIC3R_APP_NAME)));
-    extra_headers.insert(std::make_pair("X-BBL-Client-Version", VersionInfo::convert_full_version(SLIC3R_VERSION)));
-#endif
 #if defined(__WINDOWS__)
     if (Slic3r::PJarczakLinuxBridge::enabled()) {
         extra_headers.insert(std::make_pair("X-BBL-OS-Type", Slic3r::PJarczakLinuxBridge::forced_download_os_type()));
@@ -3722,6 +3730,19 @@ bool GUI_App::on_init_network(bool try_backup)
     };
 
     std::string config_version = get_latest_network_version();
+#if defined(__LINUX__)
+    {
+        const auto native_ca_bundle = boost::filesystem::path(resources_dir()) / "cert" / "ca-certificates.crt";
+        if (boost::filesystem::exists(native_ca_bundle)) {
+            ::setenv("SSL_CERT_FILE", native_ca_bundle.string().c_str(), 1);
+            ::setenv("CURL_CA_BUNDLE", native_ca_bundle.string().c_str(), 1);
+            ::setenv("SSL_CERT_DIR", "/etc/ssl/certs", 1);
+            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": configured native Linux CA bundle: " << native_ca_bundle.string();
+        } else {
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": native Linux CA bundle not found: " << native_ca_bundle.string();
+        }
+    }
+#endif
     if (app_config && app_config->get_network_plugin_version() != config_version) {
         app_config->set(SETTING_NETWORK_PLUGIN_VERSION, config_version);
         app_config->save();

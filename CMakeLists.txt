@@ -770,6 +770,13 @@ foreach(po_file ${L10N_PO_FILES})
     )
 endforeach()
 
+if (TARGET OrcaSlicer)
+    add_dependencies(OrcaSlicer gettext_po_to_mo)
+endif ()
+if (TARGET OrcaSlicer_app_gui)
+    add_dependencies(OrcaSlicer_app_gui gettext_po_to_mo)
+endif ()
+
 find_package(NLopt 1.4 REQUIRED)
 
 
