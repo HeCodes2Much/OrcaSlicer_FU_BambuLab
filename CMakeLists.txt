@@ -708,11 +708,34 @@ endif ()
 # l10n
 set(L10N_DIR "${SLIC3R_RESOURCES_DIR}/i18n")
 set(BBL_L18N_DIR "${CMAKE_CURRENT_SOURCE_DIR}/localization/i18n")
+
+if (WIN32)
+    set(GETTEXT_XGETTEXT_EXECUTABLE "${PROJECT_SOURCE_DIR}/tools/xgettext.exe")
+    set(GETTEXT_MSGMERGE_EXECUTABLE "${PROJECT_SOURCE_DIR}/tools/msgmerge.exe")
+    set(GETTEXT_MSGFMT_EXECUTABLE "${PROJECT_SOURCE_DIR}/tools/msgfmt.exe")
+else ()
+    find_program(GETTEXT_XGETTEXT_EXECUTABLE xgettext)
+    find_program(GETTEXT_MSGMERGE_EXECUTABLE msgmerge)
+    find_program(GETTEXT_MSGFMT_EXECUTABLE msgfmt)
+
+    if (NOT GETTEXT_XGETTEXT_EXECUTABLE)
+        set(GETTEXT_XGETTEXT_EXECUTABLE xgettext)
+    endif ()
+
+    if (NOT GETTEXT_MSGMERGE_EXECUTABLE)
+        set(GETTEXT_MSGMERGE_EXECUTABLE msgmerge)
+    endif ()
+
+    if (NOT GETTEXT_MSGFMT_EXECUTABLE)
+        set(GETTEXT_MSGFMT_EXECUTABLE msgfmt)
+    endif ()
+endif ()
+
 add_custom_target(gettext_make_pot
-    COMMAND xgettext --keyword=L --keyword=_L --keyword=_u8L --keyword=L_CONTEXT:1,2c --keyword=_L_PLURAL:1,2 --add-comments=TRN --from-code=UTF-8 --no-location --debug --boost
+    COMMAND ${GETTEXT_XGETTEXT_EXECUTABLE} --keyword=L --keyword=_L --keyword=_u8L --keyword=L_CONTEXT:1,2c --keyword=_L_PLURAL:1,2 --add-comments=TRN --from-code=UTF-8 --no-location --debug --boost
         -f "${BBL_L18N_DIR}/list.txt"
         -o "${BBL_L18N_DIR}/OrcaSlicer.pot"
-	COMMAND hintsToPot ${SLIC3R_RESOURCES_DIR} ${BBL_L18N_DIR}
+    COMMAND hintsToPot ${SLIC3R_RESOURCES_DIR} ${BBL_L18N_DIR}
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     COMMENT "Generate pot file from strings in the source tree"
 )
@@ -722,12 +745,10 @@ add_custom_target(gettext_merge_po_with_pot
 )
 file(GLOB BBL_L10N_PO_FILES "${BBL_L18N_DIR}/*/OrcaSlicer*.po")
 foreach(po_file ${BBL_L10N_PO_FILES})
-    GET_FILENAME_COMPONENT(po_dir "${po_file}" DIRECTORY)
-    SET(po_new_file "${po_dir}/OrcaSlicer_.po")
     add_custom_command(
         TARGET gettext_merge_po_with_pot PRE_BUILD
-        COMMAND msgmerge -N -o ${po_file} ${po_file} "${BBL_L18N_DIR}/OrcaSlicer.pot"
-        DEPENDS ${po_file}
+        COMMAND ${GETTEXT_MSGMERGE_EXECUTABLE} -N -o "${po_file}" "${po_file}" "${BBL_L18N_DIR}/OrcaSlicer.pot"
+        DEPENDS "${po_file}"
     )
 endforeach()
 add_custom_target(gettext_po_to_mo
@@ -736,16 +757,16 @@ add_custom_target(gettext_po_to_mo
 )
 file(GLOB L10N_PO_FILES "${BBL_L18N_DIR}/*/OrcaSlicer*.po")
 foreach(po_file ${L10N_PO_FILES})
-    GET_FILENAME_COMPONENT(SECOND_FOLDER_ABSOLUTE ${po_file} DIRECTORY)
-    string(REGEX REPLACE ".*/(.*)" "\\1" po_dir "${SECOND_FOLDER_ABSOLUTE}" )
-    SET(mo_dir "${L10N_DIR}/${po_dir}")
-    SET(mo_file "${mo_dir}/OrcaSlicer.mo")
+    get_filename_component(po_parent_dir "${po_file}" DIRECTORY)
+    get_filename_component(po_dir "${po_parent_dir}" NAME)
+    set(mo_dir "${L10N_DIR}/${po_dir}")
+    set(mo_file "${mo_dir}/OrcaSlicer.mo")
     add_custom_command(
         TARGET gettext_po_to_mo PRE_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${mo_dir}
-        COMMAND msgfmt ARGS --check-format -o ${mo_file} ${po_file}
-        #COMMAND msgfmt ARGS --check-compatibility -o ${mo_file} ${po_file}
-        DEPENDS ${po_file}
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${mo_dir}"
+        COMMAND ${GETTEXT_MSGFMT_EXECUTABLE} --check-format -o "${mo_file}" "${po_file}"
+        #COMMAND ${GETTEXT_MSGFMT_EXECUTABLE} --check-compatibility -o "${mo_file}" "${po_file}"
+        DEPENDS "${po_file}"
     )
 endforeach()
 
