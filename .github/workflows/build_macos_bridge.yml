@@ -61,7 +61,7 @@ jobs:
 
   build_macos_arm64:
     name: Build macOS arm64
-    runs-on: macos-15
+    runs-on: macos-14
     needs: prepare_linux_bridge_runtime
     env:
       ORCA_UPDATER_SIG_KEY: ${{ secrets.ORCA_UPDATER_SIG_KEY }}
@@ -93,7 +93,8 @@ jobs:
       - name: Install mac tools
         shell: bash
         run: |
-          brew install autoconf automake texinfo libtool nasm yasm x264
+          brew install automake texinfo libtool
+          brew list
           mkdir -p "$GITHUB_WORKSPACE/deps/build/arm64"
 
       - name: Build macOS arm64 deps
@@ -120,7 +121,7 @@ jobs:
 
   build_macos_x86_64:
     name: Build macOS x86_64
-    runs-on: macos-15-intel
+    runs-on: macos-14
     needs: prepare_linux_bridge_runtime
     env:
       ORCA_UPDATER_SIG_KEY: ${{ secrets.ORCA_UPDATER_SIG_KEY }}
@@ -152,7 +153,8 @@ jobs:
       - name: Install mac tools
         shell: bash
         run: |
-          brew install autoconf automake texinfo libtool nasm yasm x264
+          brew install automake texinfo libtool
+          brew list
           mkdir -p "$GITHUB_WORKSPACE/deps/build/x86_64"
 
       - name: Build macOS x86_64 deps
@@ -179,7 +181,7 @@ jobs:
 
   build_macos_universal:
     name: Build macOS universal
-    runs-on: macos-15
+    runs-on: macos-14
     needs:
       - build_macos_arm64
       - build_macos_x86_64

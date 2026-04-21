@@ -98,6 +98,10 @@ jobs:
 
           cmake --build build --config Release --target install -j"$(nproc)"
 
+          ./scripts/run_gettext.sh
+          mkdir -p install-dir/resources/i18n
+          cp -a resources/i18n/. install-dir/resources/i18n/
+
           app_bin=""
           for candidate in \
             "install-dir/bin/OrcaSlicer" \
@@ -306,6 +310,10 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="${PWD}/install-dir"
 
           cmake --build build --config Release --target install -j"$(nproc)"
+
+          ./scripts/run_gettext.sh
+          mkdir -p install-dir/resources/i18n
+          cp -a resources/i18n/. install-dir/resources/i18n/
 
           app_bin=""
           for candidate in \

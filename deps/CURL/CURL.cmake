@@ -29,14 +29,12 @@ if (WIN32)
   set(_curl_platform_flags  ${_curl_platform_flags} -DCMAKE_USE_OPENSSL=ON -DCURL_CA_PATH:STRING=none)
 elseif (APPLE)
   set(_curl_platform_flags 
+    
     ${_curl_platform_flags}
+
     #-DCMAKE_USE_SECTRANSP:BOOL=ON 
     -DCMAKE_USE_OPENSSL:BOOL=ON
-    -DOPENSSL_ROOT_DIR:PATH=${DESTDIR}
-    -DOPENSSL_INCLUDE_DIR:PATH=${DESTDIR}/include
-    -DOPENSSL_SSL_LIBRARY:FILEPATH=${DESTDIR}/lib/libssl.a
-    -DOPENSSL_CRYPTO_LIBRARY:FILEPATH=${DESTDIR}/lib/libcrypto.a
-    -DOPENSSL_USE_STATIC_LIBS:BOOL=ON
+
     -DCURL_CA_PATH:STRING=none
   )
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
