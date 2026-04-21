@@ -6252,7 +6252,7 @@ void GUI_App::sync_preset(Preset* preset)
             if (!new_setting_id.empty()) {
                 setting_id = new_setting_id;
                 result = 0;
-                auto it = values_map.find(BBL_JSON_KEY_UPDATE_TIME);
+                auto it = values_map.find(IOT_JSON_KEY_UPDATE_TIME);
                 if (it == values_map.end() || it->second.empty())
                     it = values_map.find(ORCA_JSON_KEY_UPDATE_TIME);
                 if (it != values_map.end() && !it->second.empty())
@@ -6283,7 +6283,7 @@ void GUI_App::sync_preset(Preset* preset)
             if (!new_setting_id.empty()) {
                 setting_id = new_setting_id;
                 result = 0;
-                auto it = values_map.find(BBL_JSON_KEY_UPDATE_TIME);
+                auto it = values_map.find(IOT_JSON_KEY_UPDATE_TIME);
                 if (it == values_map.end() || it->second.empty())
                     it = values_map.find(ORCA_JSON_KEY_UPDATE_TIME);
                 if (it != values_map.end() && !it->second.empty())
@@ -6317,7 +6317,7 @@ void GUI_App::sync_preset(Preset* preset)
                     updated_info = "hold";
                     BOOST_LOG_TRIVIAL(error) << "[sync_preset] put setting_id = " << setting_id << " failed, http_code = " << http_code;
                 } else {
-                        auto it = values_map.find(BBL_JSON_KEY_UPDATE_TIME);
+                        auto it = values_map.find(IOT_JSON_KEY_UPDATE_TIME);
                         if (it == values_map.end() || it->second.empty())
                             it = values_map.find(ORCA_JSON_KEY_UPDATE_TIME);
                         if (it != values_map.end() && !it->second.empty())
@@ -6426,7 +6426,7 @@ void GUI_App::start_sync_user_preset(bool with_progress_dlg)
                 auto type = info[BBL_JSON_KEY_TYPE];
                 auto name = info[BBL_JSON_KEY_NAME];
                 auto setting_id = info[BBL_JSON_KEY_SETTING_ID];
-                auto update_time_str = info[BBL_JSON_KEY_UPDATE_TIME];
+                auto update_time_str = info[IOT_JSON_KEY_UPDATE_TIME];
                 if (update_time_str.empty())
                     update_time_str = info[ORCA_JSON_KEY_UPDATE_TIME];
                 long long update_time = 0;
