@@ -5413,6 +5413,7 @@ Plater::priv::priv(Plater *q, MainFrame *main_frame)
 
 Plater::priv::~priv()
 {
+    partplate_list.detach_plater();
     partplate_list.clear(true, true);
 
     if (config != nullptr)

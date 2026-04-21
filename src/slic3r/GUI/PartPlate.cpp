@@ -2384,11 +2384,19 @@ void PartPlate::invalidate_plate_name_texture()
 {
 	m_plate_name_edit_icon.mesh_raycaster.reset();
 
+	if (wxGetApp().is_closing())
+		return;
+
 	auto canvas = (m_plater != nullptr) ? m_plater->get_view3D_canvas3D() : nullptr;
 	if (canvas != nullptr) {
 		canvas->remove_raycasters_for_picking(SceneRaycaster::EType::Bed, picking_id_component(6));
 		canvas->set_as_dirty();
 	}
+}
+
+void PartPlate::detach_plater()
+{
+	m_plater = nullptr;
 }
 
 void PartPlate::set_plate_name(const std::string& name) 

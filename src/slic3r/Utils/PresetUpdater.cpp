@@ -954,6 +954,7 @@ void PresetUpdater::priv::sync_plugins(std::string http_url, std::string plugin_
         std::map<std::string, std::string> current_headers = previous_headers;
         current_headers["X-BBL-OS-Type"] = Slic3r::PJarczakLinuxBridge::forced_download_os_type();
         current_headers["X-BBL-Client-Name"] = "BambuStudio";
+        current_headers["X-BBL-Client-Version"] = Slic3r::PJarczakLinuxBridge::forced_client_version();
         Slic3r::Http::set_extra_headers(current_headers);
         BOOST_LOG_TRIVIAL(info) << boost::format("set X-BBL-OS-Type to %1% for bridge plugin sync") % Slic3r::PJarczakLinuxBridge::forced_download_os_type();
         plugin_headers_overridden = true;
@@ -969,6 +970,7 @@ void PresetUpdater::priv::sync_plugins(std::string http_url, std::string plugin_
         std::map<std::string, std::string> current_headers = previous_headers;
         current_headers["X-BBL-OS-Type"] = Slic3r::PJarczakLinuxBridge::forced_download_os_type();
         current_headers["X-BBL-Client-Name"] = "BambuStudio";
+        current_headers["X-BBL-Client-Version"] = Slic3r::PJarczakLinuxBridge::forced_client_version();
         Slic3r::Http::set_extra_headers(current_headers);
         BOOST_LOG_TRIVIAL(info) << boost::format("set X-BBL-OS-Type to %1% for bridge plugin sync") % Slic3r::PJarczakLinuxBridge::forced_download_os_type();
         plugin_headers_overridden = true;

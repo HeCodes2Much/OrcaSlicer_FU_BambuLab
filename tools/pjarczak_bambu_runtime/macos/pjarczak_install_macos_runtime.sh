@@ -50,7 +50,8 @@ trim_file() {
     if [[ ! -f "$path" ]]; then
         return 1
     fi
-    LC_ALL=C tr -d '' < "$path" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+    LC_ALL=C tr -d '
+' < "$path" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
 find_limactl() {
@@ -78,6 +79,19 @@ find_limactl() {
     return 1
 }
 
+resolve_lima_version_from_redirect() {
+    local effective_url=""
+    effective_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/lima-vm/lima/releases/latest || true)
+    case "$effective_url" in
+        */tag/*)
+            printf '%s
+' "${effective_url##*/}"
+            return 0
+            ;;
+    esac
+    return 1
+}
+
 resolve_lima_version() {
     if [[ -n "${PJARCZAK_LIMA_VERSION:-}" ]]; then
         printf '%s
@@ -85,7 +99,15 @@ resolve_lima_version() {
         return 0
     fi
 
-    curl -fsSL https://api.github.com/repos/lima-vm/lima/releases/latest | awk -F'"' '/"tag_name"[[:space:]]*:/ { print $4; exit }'
+    local version=""
+    version=$(curl -fsSL https://api.github.com/repos/lima-vm/lima/releases/latest | awk -F'"' '/"tag_name"[[:space:]]*:/ { print $4; exit }' || true)
+    if [[ -n "$version" ]]; then
+        printf '%s
+' "$version"
+        return 0
+    fi
+
+    resolve_lima_version_from_redirect
 }
 
 install_lima_binary_locally() {
