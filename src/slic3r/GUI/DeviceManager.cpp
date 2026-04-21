@@ -51,6 +51,103 @@
 
 namespace pt = boost::property_tree;
 
+namespace {
+
+constexpr int AUTO_IGNORED_PRINT_ERROR_0500409D = 0x0500409D;
+
+inline bool is_auto_ignored_print_error(int error_code)
+{
+    return error_code == AUTO_IGNORED_PRINT_ERROR_0500409D;
+}
+
+inline bool is_auto_ignored_print_error_code_string(const std::string& error_code)
+{
+    return boost::to_upper_copy(error_code) == "0500409D";
+}
+
+inline std::string build_hms_long_error_code(unsigned attr, unsigned code)
+{
+    char buf[64];
+    ::sprintf(buf, "%02X%02X%02X00000%1X%04X",
+        (attr >> 24) & 0xFF,
+        (attr >> 16) & 0xFF,
+        (attr >> 8) & 0xFF,
+        (code >> 16) & 0xFFFF,
+        code & 0xFFFF);
+    return std::string(buf);
+}
+
+inline bool should_filter_hms_item(unsigned attr, unsigned code)
+{
+    if ((attr == 83887104 && code == 65604) ||
+        (attr == 83952640 && code == 65604) ||
+        (attr == 84018176 && code == 65604) ||
+        (attr == 84083712 && code == 65604) ||
+        (attr == 83887616 && code == 65552) ||
+        (attr == 83953152 && code == 65552) ||
+        (attr == 84018688 && code == 65552) ||
+        (attr == 84084224 && code == 65552) ||
+        (attr == 84149760 && code == 65552) ||
+        (attr == 84215296 && code == 65552) ||
+        (attr == 84280832 && code == 65552)) {
+        return true;
+    }
+
+    return is_auto_ignored_print_error_code_string(build_hms_long_error_code(attr, code));
+}
+
+inline void auto_ignore_print_error_if_needed(Slic3r::MachineObject* obj)
+{
+    if (!obj) {
+        return;
+    }
+
+    int active_error = 0;
+    if (is_auto_ignored_print_error(obj->print_error)) {
+        active_error = obj->print_error;
+    } else if (is_auto_ignored_print_error(obj->mc_print_error_code)) {
+        active_error = obj->mc_print_error_code;
+    }
+
+    if (!active_error) {
+        obj->last_auto_ignored_print_error_ = 0;
+        return;
+    }
+
+    if (obj->last_auto_ignored_print_error_ != active_error) {
+        BOOST_LOG_TRIVIAL(info) << "auto ignore print_error 0500-409D for dev_id=" << obj->get_dev_id();
+
+        if (!obj->job_id_.empty()) {
+            obj->command_hms_ignore(std::to_string(active_error), obj->job_id_);
+        }
+        if (!obj->subtask_id_.empty()) {
+            obj->command_clean_print_error(obj->subtask_id_, active_error);
+        }
+        obj->command_clean_print_error_uiop(active_error);
+
+        bool retried_via_ui = false;
+        if (auto* manager = Slic3r::GUI::wxGetApp().getDeviceManager()) {
+            retried_via_ui = manager->trigger_auto_retry_print_ui_callback(obj->get_dev_id());
+        }
+        if (!retried_via_ui) {
+            if (auto* agent = Slic3r::GUI::wxGetApp().getAgent()) {
+                agent->retry_last_print_request(obj->get_dev_id());
+            }
+        }
+
+        obj->last_auto_ignored_print_error_ = active_error;
+    }
+
+    if (obj->mc_print_error_code == active_error) {
+        obj->mc_print_error_code = 0;
+    }
+    if (obj->print_error == active_error) {
+        obj->print_error = 0;
+    }
+}
+
+} // namespace
+
 float string_to_float(const std::string& str_value) {
     float value = 0.0;
     fast_float::from_chars(str_value.c_str(), str_value.c_str() + str_value.size(), value);
@@ -2370,6 +2467,7 @@ void MachineObject::reset()
     dev_connection_name = "";
     job_id_ = "";
     jobState_ = 0;
+    last_auto_ignored_print_error_ = 0;
     m_plate_index = -1;
     device_cert_installed = false;
 
@@ -3696,17 +3794,9 @@ int MachineObject::parse_json(std::string tunnel, std::string payload, bool key_
 
                             for (const auto& item : h) {
                                 if (item.is_object() && item.contains("attr") && item.contains("code")) {
-                                    if ((item["attr"] == 83887104 && item["code"] == 65604) ||
-                                        (item["attr"] == 83952640 && item["code"] == 65604) ||
-                                        (item["attr"] == 84018176 && item["code"] == 65604) ||
-                                        (item["attr"] == 84083712 && item["code"] == 65604) ||
-                                        (item["attr"] == 83887616 && item["code"] == 65552) ||
-                                        (item["attr"] == 83953152 && item["code"] == 65552) ||
-                                        (item["attr"] == 84018688 && item["code"] == 65552) ||
-                                        (item["attr"] == 84084224 && item["code"] == 65552) ||
-                                        (item["attr"] == 84149760 && item["code"] == 65552) ||
-                                        (item["attr"] == 84215296 && item["code"] == 65552) ||
-                                        (item["attr"] == 84280832 && item["code"] == 65552)) {
+                                    const unsigned attr = item["attr"].get<unsigned>();
+                                    const unsigned code = item["code"].get<unsigned>();
+                                    if (should_filter_hms_item(attr, code)) {
                                         continue;
                                     }
                                 }
@@ -3714,8 +3804,15 @@ int MachineObject::parse_json(std::string tunnel, std::string payload, bool key_
                                 filtered.push_back(item);
                             }
 
-                            if (!filtered.empty())
-                                m_hms_system->ParseHMSItems(filtered);
+                            m_hms_system->ParseHMSItems(filtered);
+                        } else if (h.is_object() && h.contains("attr") && h.contains("code")) {
+                            const unsigned attr = h["attr"].get<unsigned>();
+                            const unsigned code = h["code"].get<unsigned>();
+                            if (should_filter_hms_item(attr, code)) {
+                                m_hms_system->ParseHMSItems(json::array());
+                            } else {
+                                m_hms_system->ParseHMSItems(h);
+                            }
                         } else {
                             m_hms_system->ParseHMSItems(h);
                         }
@@ -3803,6 +3900,8 @@ int MachineObject::parse_json(std::string tunnel, std::string payload, bool key_
                     try {
                         parse_new_info(jj);
                     } catch (...) {}
+
+                    auto_ignore_print_error_if_needed(this);
 #pragma endregion
                 } else if (jj["command"].get<std::string>() == "gcode_line") {
                     //ack of gcode_line
@@ -5535,6 +5634,11 @@ std::string MachineObject::get_error_code_str(int error_code)
 
 void MachineObject::add_command_error_code_dlg(int command_err, json action_json)
 {
+    if (is_auto_ignored_print_error(command_err)) {
+        BOOST_LOG_TRIVIAL(info) << "skip command error dialog for 0500-409D, dev_id=" << get_dev_id();
+        return;
+    }
+
     if (command_err > 0 && !Slic3r::GUI::wxGetApp().get_hms_query()->is_internal_error(this, command_err))
     {
         GUI::wxGetApp().CallAfter([this, command_err, action_json, token = std::weak_ptr<int>(m_token)]

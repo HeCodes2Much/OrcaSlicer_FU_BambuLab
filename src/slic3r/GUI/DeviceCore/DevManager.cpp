@@ -116,6 +116,26 @@ namespace Slic3r
         m_enable_mutil_machine = enable;
     }
 
+
+    void DeviceManager::set_auto_retry_print_ui_callback(std::function<bool(const std::string&)> callback)
+    {
+        std::lock_guard<std::mutex> lock(autoRetryPrintUiCallbackMutex);
+        m_auto_retry_print_ui_callback = std::move(callback);
+    }
+
+    bool DeviceManager::trigger_auto_retry_print_ui_callback(const std::string& dev_id)
+    {
+        std::function<bool(const std::string&)> callback;
+        {
+            std::lock_guard<std::mutex> lock(autoRetryPrintUiCallbackMutex);
+            callback = m_auto_retry_print_ui_callback;
+        }
+        if (!callback) {
+            return false;
+        }
+        return callback(dev_id);
+    }
+
     void DeviceManager::start_refresher() { m_refresher->Start(); }
     void DeviceManager::stop_refresher() { m_refresher->Stop(); }
 

@@ -599,6 +599,22 @@ int NetworkAgent::start_sdcard_print(PrintParams params, OnUpdateStatusFn update
     return -1;
 }
 
+bool NetworkAgent::retry_last_print_request(const std::string& dev_id)
+{
+    std::shared_ptr<IPrinterAgent> printer_agent;
+    {
+        std::lock_guard<std::mutex> lock(m_agent_mutex);
+        printer_agent = m_printer_agent;
+    }
+
+    auto bbl_printer_agent = std::dynamic_pointer_cast<BBLPrinterAgent>(printer_agent);
+    if (!bbl_printer_agent) {
+        return false;
+    }
+
+    return bbl_printer_agent->retry_last_print_request(dev_id);
+}
+
 FilamentSyncMode NetworkAgent::get_filament_sync_mode() const
 {
     if (m_printer_agent) return m_printer_agent->get_filament_sync_mode();
