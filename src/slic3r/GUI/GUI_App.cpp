@@ -6252,9 +6252,11 @@ void GUI_App::sync_preset(Preset* preset)
             if (!new_setting_id.empty()) {
                 setting_id = new_setting_id;
                 result = 0;
-                auto update_time_str = values_map[ORCA_JSON_KEY_UPDATE_TIME];
-                if (!update_time_str.empty())
-                    update_time = std::atoll(update_time_str.c_str());
+                auto it = values_map.find(BBL_JSON_KEY_UPDATE_TIME);
+                if (it == values_map.end() || it->second.empty())
+                    it = values_map.find(ORCA_JSON_KEY_UPDATE_TIME);
+                if (it != values_map.end() && !it->second.empty())
+                    update_time = std::atoll(it->second.c_str());
             }
             else {
                 BOOST_LOG_TRIVIAL(trace) << "[sync_preset]init: request_setting_id failed, http code "<<http_code;
@@ -6281,9 +6283,11 @@ void GUI_App::sync_preset(Preset* preset)
             if (!new_setting_id.empty()) {
                 setting_id = new_setting_id;
                 result = 0;
-                auto update_time_str = values_map[ORCA_JSON_KEY_UPDATE_TIME];
-                if (!update_time_str.empty())
-                    update_time = std::atoll(update_time_str.c_str());
+                auto it = values_map.find(BBL_JSON_KEY_UPDATE_TIME);
+                if (it == values_map.end() || it->second.empty())
+                    it = values_map.find(ORCA_JSON_KEY_UPDATE_TIME);
+                if (it != values_map.end() && !it->second.empty())
+                    update_time = std::atoll(it->second.c_str());
             } else {
                 BOOST_LOG_TRIVIAL(trace) << "[sync_preset]create: request_setting_id failed, http code "<<http_code;
                 // do not post new preset this time if http code >= 400
@@ -6313,9 +6317,11 @@ void GUI_App::sync_preset(Preset* preset)
                     updated_info = "hold";
                     BOOST_LOG_TRIVIAL(error) << "[sync_preset] put setting_id = " << setting_id << " failed, http_code = " << http_code;
                 } else {
-                        auto update_time_str = values_map[ORCA_JSON_KEY_UPDATE_TIME];
-                        if (!update_time_str.empty())
-                            update_time = std::atoll(update_time_str.c_str());
+                        auto it = values_map.find(BBL_JSON_KEY_UPDATE_TIME);
+                        if (it == values_map.end() || it->second.empty())
+                            it = values_map.find(ORCA_JSON_KEY_UPDATE_TIME);
+                        if (it != values_map.end() && !it->second.empty())
+                            update_time = std::atoll(it->second.c_str());
                 }
                 }
 
@@ -6414,13 +6420,15 @@ void GUI_App::start_sync_user_preset(bool with_progress_dlg)
     m_sync_update_thread = Slic3r::create_thread(
         [this, progressFn, cancelFn, finishFn, t = std::weak_ptr<int>(m_user_sync_token)] {
             // get setting list, update setting list
-            std::string version = preset_bundle->get_vendor_profile_version(PresetBundle::ORCA_DEFAULT_BUNDLE).to_string();
+            std::string version = preset_bundle->get_vendor_profile_version("BBL").to_string();
             if(!m_agent) return;
             int ret = m_agent->get_setting_list2(version, [this](auto info) {
                 auto type = info[BBL_JSON_KEY_TYPE];
                 auto name = info[BBL_JSON_KEY_NAME];
                 auto setting_id = info[BBL_JSON_KEY_SETTING_ID];
-                auto update_time_str = info[ORCA_JSON_KEY_UPDATE_TIME];
+                auto update_time_str = info[BBL_JSON_KEY_UPDATE_TIME];
+                if (update_time_str.empty())
+                    update_time_str = info[ORCA_JSON_KEY_UPDATE_TIME];
                 long long update_time = 0;
                 if (!update_time_str.empty())
                     update_time = std::atoll(update_time_str.c_str());

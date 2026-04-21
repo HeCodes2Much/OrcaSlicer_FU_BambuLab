@@ -125,6 +125,7 @@ if (NOT WIN32 AND NOT APPLE)
 endif ()
 
 target_link_libraries(OrcaSlicer libslic3r cereal::cereal)
+add_dependencies(OrcaSlicer gettext_po_to_mo)
 
 set(PJARCZAK_WINDOWS_RUNTIME_SUPPORT_FILES "")
 set(PJARCZAK_OPTIONAL_WINDOWS_RUNTIME_FILES "")
