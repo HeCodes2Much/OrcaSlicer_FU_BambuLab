@@ -945,10 +945,11 @@ void PresetUpdater::priv::sync_plugins(std::string http_url, std::string plugin_
         }
     }
 
-#if defined(__WINDOWS__)
+#if defined(__WINDOWS__) || defined(__APPLE__)
     std::map<std::string, std::string> previous_headers = Slic3r::Http::get_extra_headers();
     bool plugin_headers_overridden = false;
 
+#if defined(__WINDOWS__)
     if (Slic3r::PJarczakLinuxBridge::enabled()) {
         std::map<std::string, std::string> current_headers = previous_headers;
         current_headers["X-BBL-OS-Type"] = Slic3r::PJarczakLinuxBridge::forced_download_os_type();
@@ -963,6 +964,16 @@ void PresetUpdater::priv::sync_plugins(std::string http_url, std::string plugin_
         BOOST_LOG_TRIVIAL(info) << boost::format("set X-BBL-OS-Type to windows_arm");
         plugin_headers_overridden = true;
     }
+#else
+    if (Slic3r::PJarczakLinuxBridge::enabled()) {
+        std::map<std::string, std::string> current_headers = previous_headers;
+        current_headers["X-BBL-OS-Type"] = Slic3r::PJarczakLinuxBridge::forced_download_os_type();
+        current_headers["X-BBL-Client-Name"] = "BambuStudio";
+        Slic3r::Http::set_extra_headers(current_headers);
+        BOOST_LOG_TRIVIAL(info) << boost::format("set X-BBL-OS-Type to %1% for bridge plugin sync") % Slic3r::PJarczakLinuxBridge::forced_download_os_type();
+        plugin_headers_overridden = true;
+    }
+#endif
 #endif
     try {
         std::map<std::string, Resource> resources
@@ -974,7 +985,7 @@ void PresetUpdater::priv::sync_plugins(std::string http_url, std::string plugin_
     catch (std::exception& e) {
         BOOST_LOG_TRIVIAL(warning) << format("[Orca Updater] sync_plugins: %1%", e.what());
     }
-#if defined(__WINDOWS__)
+#if defined(__WINDOWS__) || defined(__APPLE__)
     if (plugin_headers_overridden) {
         Slic3r::Http::set_extra_headers(previous_headers);
         BOOST_LOG_TRIVIAL(info) << "restored plugin sync headers";

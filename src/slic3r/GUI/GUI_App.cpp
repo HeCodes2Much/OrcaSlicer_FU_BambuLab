@@ -2390,7 +2390,7 @@ std::map<std::string, std::string> GUI_App::get_extra_header()
     extra_headers.insert(std::make_pair("X-BBL-Client-Type", "slicer"));
 
     bool use_bambustudio_identity = false;
-#if defined(__WINDOWS__)
+#if defined(__WINDOWS__) || defined(__APPLE__)
     use_bambustudio_identity = Slic3r::PJarczakLinuxBridge::enabled();
 #elif defined(__LINUX__)
     use_bambustudio_identity = true;
@@ -2417,7 +2417,11 @@ std::map<std::string, std::string> GUI_App::get_extra_header()
     }
 #endif
 #elif defined(__APPLE__)
-    extra_headers.insert(std::make_pair("X-BBL-OS-Type", "macos"));
+    if (Slic3r::PJarczakLinuxBridge::enabled()) {
+        extra_headers.insert(std::make_pair("X-BBL-OS-Type", Slic3r::PJarczakLinuxBridge::forced_download_os_type()));
+    } else {
+        extra_headers.insert(std::make_pair("X-BBL-OS-Type", "macos"));
+    }
 #elif defined(__LINUX__)
     extra_headers.insert(std::make_pair("X-BBL-OS-Type", "linux"));
 #endif

@@ -191,7 +191,7 @@ Http::priv::priv(const std::string &url)
 	::curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, log_trace);
 	::curl_easy_setopt(curl, CURLOPT_URL, url.c_str());   // curl makes a copy internally
     std::string pjarczak_user_agent = SLIC3R_APP_NAME "/" SoftFever_VERSION;
-#if defined(__WINDOWS__)
+#if defined(__WINDOWS__) || defined(__APPLE__)
     if (Slic3r::PJarczakLinuxBridge::enabled())
         pjarczak_user_agent = std::string("BambuStudio/") + Slic3r::PJarczakLinuxBridge::forced_client_version();
 #elif defined(__LINUX__)

@@ -50,8 +50,7 @@ trim_file() {
     if [[ ! -f "$path" ]]; then
         return 1
     fi
-    LC_ALL=C tr -d '
-' < "$path" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+    LC_ALL=C tr -d '' < "$path" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
 find_limactl() {
@@ -79,9 +78,19 @@ find_limactl() {
     return 1
 }
 
+resolve_lima_version() {
+    if [[ -n "${PJARCZAK_LIMA_VERSION:-}" ]]; then
+        printf '%s
+' "$PJARCZAK_LIMA_VERSION"
+        return 0
+    fi
+
+    curl -fsSL https://api.github.com/repos/lima-vm/lima/releases/latest | awk -F'"' '/"tag_name"[[:space:]]*:/ { print $4; exit }'
+}
+
 install_lima_binary_locally() {
     local version
-    version=$(curl -fsSL https://api.github.com/repos/lima-vm/lima/releases/latest | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*//p' | head -n 1)
+    version=$(resolve_lima_version)
     if [[ -z "$version" ]]; then
         echo "failed to resolve latest Lima version from GitHub API" >&2
         return 1
@@ -110,10 +119,10 @@ install_lima_binary_locally() {
     tmpdir=$(mktemp -d)
     trap 'rm -rf "$tmpdir"' RETURN
 
-    curl -fL "$base_url/$main_archive" -o "$tmpdir/$main_archive"
+    curl -fL --retry 3 --retry-delay 2 "$base_url/$main_archive" -o "$tmpdir/$main_archive"
     tar -xzf "$tmpdir/$main_archive" -C "$LOCAL_LIMA_ROOT"
 
-    if curl -fL "$base_url/$guest_archive" -o "$tmpdir/$guest_archive"; then
+    if curl -fL --retry 3 --retry-delay 2 "$base_url/$guest_archive" -o "$tmpdir/$guest_archive"; then
         tar -xzf "$tmpdir/$guest_archive" -C "$LOCAL_LIMA_ROOT"
     fi
 
@@ -188,9 +197,9 @@ if [[ -z "$INSTANCE" ]]; then
     INSTANCE="orcaslicer-bambu-network"
 fi
 
+copy_runtime_payload "$PLUGIN_DIR" "$RUNTIME_DIR"
 ensure_lima_installed
 maybe_install_rosetta
-copy_runtime_payload "$PLUGIN_DIR" "$RUNTIME_DIR"
 
 START_ARGS=(start "--name=${INSTANCE}" --tty=false --mount-writable)
 MACOS_MAJOR=$(sw_vers -productVersion | awk -F. '{print $1}')

@@ -28,24 +28,46 @@ void set_bridge_preflight_reason(std::string* detail, const std::string& value)
 
 bool bridge_payload_preflight(const boost::filesystem::path& plugin_folder, std::string* detail)
 {
-    const std::string required_files[] = {
+    const std::string common_required_files[] = {
         Slic3r::PJarczakLinuxBridge::bridge_network_current_dir_name(),
         Slic3r::PJarczakLinuxBridge::host_executable_file_name(),
         "pjarczak_bambu_linux_host_abi1",
         "pjarczak_bambu_linux_host_abi0",
-        Slic3r::PJarczakLinuxBridge::windows_wsl_distro_file_name(),
-        Slic3r::PJarczakLinuxBridge::windows_wsl_import_script_file_name(),
-        Slic3r::PJarczakLinuxBridge::windows_wsl_validate_script_file_name(),
-        Slic3r::PJarczakLinuxBridge::windows_wsl_bootstrap_script_file_name(),
-        Slic3r::PJarczakLinuxBridge::windows_wsl_rootfs_file_name(),
-        Slic3r::PJarczakLinuxBridge::windows_plugin_cache_subdir_file_name(),
         Slic3r::PJarczakLinuxBridge::linux_network_library_name(),
         Slic3r::PJarczakLinuxBridge::linux_source_library_name(),
         "ca-certificates.crt",
         "slicer_base64.cer"
     };
 
-    for (const auto& file_name : required_files) {
+    for (const auto& file_name : common_required_files) {
+        const auto candidate = plugin_folder / file_name;
+        if (!boost::filesystem::exists(candidate) || boost::filesystem::is_directory(candidate)) {
+            set_bridge_preflight_reason(detail, "missing required bridge runtime file: " + file_name);
+            return false;
+        }
+    }
+
+#if defined(_MSC_VER) || defined(_WIN32)
+    const std::string platform_required_files[] = {
+        Slic3r::PJarczakLinuxBridge::windows_wsl_distro_file_name(),
+        Slic3r::PJarczakLinuxBridge::windows_wsl_import_script_file_name(),
+        Slic3r::PJarczakLinuxBridge::windows_wsl_validate_script_file_name(),
+        Slic3r::PJarczakLinuxBridge::windows_wsl_bootstrap_script_file_name(),
+        Slic3r::PJarczakLinuxBridge::windows_wsl_rootfs_file_name(),
+        Slic3r::PJarczakLinuxBridge::windows_plugin_cache_subdir_file_name()
+    };
+#elif defined(__WXMAC__) || defined(__APPLE__)
+    const std::string platform_required_files[] = {
+        Slic3r::PJarczakLinuxBridge::mac_host_wrapper_file_name(),
+        Slic3r::PJarczakLinuxBridge::mac_runtime_install_script_file_name(),
+        Slic3r::PJarczakLinuxBridge::mac_runtime_verify_script_file_name(),
+        Slic3r::PJarczakLinuxBridge::mac_lima_instance_file_name()
+    };
+#else
+    const std::string platform_required_files[] = {};
+#endif
+
+    for (const auto& file_name : platform_required_files) {
         const auto candidate = plugin_folder / file_name;
         if (!boost::filesystem::exists(candidate) || boost::filesystem::is_directory(candidate)) {
             set_bridge_preflight_reason(detail, "missing required bridge runtime file: " + file_name);
