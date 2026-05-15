@@ -394,6 +394,12 @@ if(NOT FREETYPE_FOUND)
     set(FREETYPE_PKG "dep_FREETYPE")
 endif()
 
+set(FFMPEG_PKG "")
+if (MSVC OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    include(FFMPEG/FFMPEG.cmake)
+    set(FFMPEG_PKG "dep_FFMPEG")
+endif()
+
 execute_process(
     COMMAND ${GIT_EXECUTABLE} rev-parse --is-inside-work-tree
     RESULT_VARIABLE REV_PARSE_RESULT
@@ -428,6 +434,7 @@ set(_dep_list
     dep_GLFW
     dep_OCCT
     ${FREETYPE_PKG}
+    ${FFMPEG_PKG}
     ${PNG_PKG}
     ${ZLIB_PKG}
     ${EXPAT_PKG}

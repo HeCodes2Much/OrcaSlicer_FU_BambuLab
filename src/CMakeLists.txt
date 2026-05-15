@@ -137,6 +137,80 @@ if (NOT WIN32 AND NOT APPLE)
 endif ()
 
 target_link_libraries(OrcaSlicer libslic3r cereal::cereal)
+
+set(PJARCZAK_WINDOWS_RUNTIME_SUPPORT_FILES "")
+set(PJARCZAK_OPTIONAL_WINDOWS_RUNTIME_FILES "")
+if (WIN32)
+    foreach(_runtime_support_file
+        "${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_runtime/wsl/pjarczak_wsl_distro.txt"
+        "${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_runtime/wsl/install_runtime.ps1"
+        "${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_runtime/wsl/install_runtime.cmd"
+        "${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_runtime/wsl/verify_runtime.ps1"
+        "${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_runtime/wsl/pjarczak_wsl_run_host.sh"
+        "${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_runtime/wsl/pjarczak_plugin_cache_subdir.txt"
+        "${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_runtime/release/assemble_windows_runtime_bundle.ps1")
+        if (EXISTS "${_runtime_support_file}")
+            file(TO_CMAKE_PATH "${_runtime_support_file}" _runtime_support_file_cmake)
+            list(APPEND PJARCZAK_WINDOWS_RUNTIME_SUPPORT_FILES "${_runtime_support_file_cmake}")
+        endif()
+    endforeach()
+
+    if (DEFINED PJARCZAK_WSL_RUNTIME_DIR AND NOT "${PJARCZAK_WSL_RUNTIME_DIR}" STREQUAL "")
+        if (NOT EXISTS "${PJARCZAK_WSL_RUNTIME_DIR}")
+            message(FATAL_ERROR "PJARCZAK_WSL_RUNTIME_DIR does not exist: ${PJARCZAK_WSL_RUNTIME_DIR}")
+        endif()
+
+        file(GLOB PJARCZAK_WSL_RUNTIME_DIR_GLOB LIST_DIRECTORIES false "${PJARCZAK_WSL_RUNTIME_DIR}/*")
+        if (NOT PJARCZAK_WSL_RUNTIME_DIR_GLOB)
+            message(FATAL_ERROR "PJARCZAK_WSL_RUNTIME_DIR is empty: ${PJARCZAK_WSL_RUNTIME_DIR}")
+        endif()
+
+        foreach(_runtime_file ${PJARCZAK_WSL_RUNTIME_DIR_GLOB})
+            if (EXISTS "${_runtime_file}" AND NOT IS_DIRECTORY "${_runtime_file}")
+                file(TO_CMAKE_PATH "${_runtime_file}" _runtime_file_cmake)
+                list(APPEND PJARCZAK_OPTIONAL_WINDOWS_RUNTIME_FILES "${_runtime_file_cmake}")
+            endif()
+        endforeach()
+    else()
+        foreach(_runtime_file
+            "${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_linux_host/runtime/linux-x86_64/pjarczak_bambu_linux_host"
+            "${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_linux_host/runtime/linux-x86_64/pjarczak_bambu_linux_host_abi1"
+            "${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_linux_host/runtime/linux-x86_64/pjarczak_bambu_linux_host_abi0"
+            "${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_linux_host/runtime/linux-x86_64/libbambu_networking.so"
+            "${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_linux_host/runtime/linux-x86_64/libBambuSource.so"
+            "${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_linux_host/runtime/linux-x86_64/linux_payload_manifest.json"
+            "${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_linux_host/runtime/linux-x86_64/libcrypto.so.3"
+            "${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_linux_host/runtime/linux-x86_64/libz.so.1"
+            "${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_linux_host/runtime/linux-x86_64/libzstd.so.1"
+            "${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_runtime/rootfs/windows-wsl2-rootfs.tar"
+            "${CMAKE_SOURCE_DIR}/tools/pjarczak_bambu_runtime/windows-wsl2-rootfs.tar")
+            if (EXISTS "${_runtime_file}")
+                file(TO_CMAKE_PATH "${_runtime_file}" _runtime_file_cmake)
+                list(APPEND PJARCZAK_OPTIONAL_WINDOWS_RUNTIME_FILES "${_runtime_file_cmake}")
+            endif()
+        endforeach()
+
+        foreach(_cert_candidate
+            "${CMAKE_SOURCE_DIR}/cert/ca-certificates.crt"
+            "${CMAKE_SOURCE_DIR}/resources/cert/ca-certificates.crt")
+            if (EXISTS "${_cert_candidate}")
+                file(TO_CMAKE_PATH "${_cert_candidate}" _runtime_file_cmake)
+                list(APPEND PJARCZAK_OPTIONAL_WINDOWS_RUNTIME_FILES "${_runtime_file_cmake}")
+                break()
+            endif()
+        endforeach()
+
+        foreach(_cert_candidate
+            "${CMAKE_SOURCE_DIR}/cert/slicer_base64.cer"
+            "${CMAKE_SOURCE_DIR}/resources/cert/slicer_base64.cer")
+            if (EXISTS "${_cert_candidate}")
+                file(TO_CMAKE_PATH "${_cert_candidate}" _runtime_file_cmake)
+                list(APPEND PJARCZAK_OPTIONAL_WINDOWS_RUNTIME_FILES "${_runtime_file_cmake}")
+                break()
+            endif()
+        endforeach()
+    endif()
+endif()
 # target_include_directories(OrcaSlicer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/slic3r)
 if (APPLE)
 #    add_compile_options(-stdlib=libc++)
@@ -231,6 +305,16 @@ if (WIN32)
 
 
 else ()
+    if (NOT APPLE AND NOT FLATPAK)
+        set(output_sos_Release "")
+        set(output_sos_Debug "")
+        add_custom_target(OrcaSlicerSosCopy ALL DEPENDS OrcaSlicer)
+        if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
+            orcaslicer_copy_sos(OrcaSlicerSosCopy "Debug" "d" output_sos_Debug)
+        else()
+            orcaslicer_copy_sos(OrcaSlicerSosCopy "Release" "" output_sos_Release)
+        endif()
+    endif()
     if (APPLE AND NOT CMAKE_MACOSX_BUNDLE)
         # On OSX, the name of the binary matches the name of the Application.
         add_custom_command(TARGET OrcaSlicer POST_BUILD
@@ -284,7 +368,20 @@ if (WIN32)
     if (MSVC)
         install(TARGETS OrcaSlicer_app_gui RUNTIME DESTINATION ".")
     endif ()
+    if (TARGET pjarczak_bambu_networking_bridge)
+        install(TARGETS pjarczak_bambu_networking_bridge RUNTIME DESTINATION ".")
+    endif ()
+    if (PJARCZAK_WINDOWS_RUNTIME_SUPPORT_FILES)
+        install(FILES ${PJARCZAK_WINDOWS_RUNTIME_SUPPORT_FILES} DESTINATION ".")
+    endif()
+    if (PJARCZAK_OPTIONAL_WINDOWS_RUNTIME_FILES)
+        install(FILES ${PJARCZAK_OPTIONAL_WINDOWS_RUNTIME_FILES} DESTINATION ".")
+    endif()
     install(FILES ${output_dlls_${build_type}} DESTINATION ".")
 else ()
+    if (APPLE)
+    else()
+        install(FILES ${output_sos_${build_type}} DESTINATION "${CMAKE_INSTALL_PREFIX}")
+    endif()
     install(TARGETS OrcaSlicer RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" BUNDLE DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif ()

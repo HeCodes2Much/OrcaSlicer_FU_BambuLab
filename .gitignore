@@ -24,6 +24,8 @@ build-linux/*
 deps/build*/*
 **/.DS_Store
 install_*
+!tools/pjarczak_bambu_runtime/wsl/install_runtime.ps1
+!tools/pjarczak_bambu_runtime/wsl/install_runtime.cmd
 build_*/
 SVG
 src/OrcaSlicer-doc/
@@ -46,3 +48,4 @@ test.js
 internal_docs/
 *.flatpak
 /flatpak-repo/
+/.idea/
