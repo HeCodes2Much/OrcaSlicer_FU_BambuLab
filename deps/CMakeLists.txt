@@ -400,6 +400,12 @@ if (MSVC OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(FFMPEG_PKG "dep_FFMPEG")
 endif()
 
+set(FFMPEG_PKG "")
+if (MSVC OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    include(FFMPEG/FFMPEG.cmake)
+    set(FFMPEG_PKG "dep_FFMPEG")
+endif()
+
 execute_process(
     COMMAND ${GIT_EXECUTABLE} rev-parse --is-inside-work-tree
     RESULT_VARIABLE REV_PARSE_RESULT

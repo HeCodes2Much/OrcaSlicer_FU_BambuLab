@@ -9,8 +9,13 @@ inline bool looks_like_change_user_data(const nlohmann::json& j)
 {
     if (!j.is_object())
         return false;
-    return j.contains("token") || j.contains("access_token") || j.contains("refresh_token") || j.contains("code") || j.contains("user") ||
-           j.contains("user_id") || j.contains("uidStr");
+    return j.contains("token") ||
+           j.contains("access_token") ||
+           j.contains("refresh_token") ||
+           j.contains("code") ||
+           j.contains("user") ||
+           j.contains("user_id") ||
+           j.contains("uidStr");
 }
 
 inline nlohmann::json normalize_change_user_payload(const nlohmann::json& input)

@@ -2441,6 +2441,14 @@ int OrcaCloudServiceAgent::get_model_mall_detail_url(std::string* url, std::stri
     return BAMBU_NETWORK_SUCCESS;
 }
 
+int OrcaCloudServiceAgent::get_my_token(std::string ticket, unsigned int* http_code, std::string* http_body)
+{
+    BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: get_my_token is not supported for native Orca auth flow";
+    if (http_code) *http_code = 501;
+    if (http_body) *http_body = R"({"error":"ticket_login_not_supported"})";
+    return BAMBU_NETWORK_ERR_INVALID_RESULT;
+}
+
 int OrcaCloudServiceAgent::get_my_profile(std::string token, unsigned int* http_code, std::string* http_body)
 {
     BOOST_LOG_TRIVIAL(debug) << "OrcaCloudServiceAgent: get_my_profile (stub)";

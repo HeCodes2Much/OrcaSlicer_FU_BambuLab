@@ -13,6 +13,15 @@ static const char* HMS_LOCAL_IMG_PATH = "hms/local_image";
 // the local HMS info
 static unordered_set<string> package_dev_id_types {"094", "239", "093", "22E"};
 
+namespace {
+
+inline bool is_auto_ignored_hms_error_code(const std::string& error_code)
+{
+    return boost::to_upper_copy(error_code) == "0500409D";
+}
+
+} // namespace
+
 namespace Slic3r {
 namespace GUI {
 
@@ -321,7 +330,7 @@ string HMSQuery::get_dev_id_type(const MachineObject* obj) const
 
 wxString HMSQuery::_query_hms_msg(const string& dev_id_type, const string& long_error_code, const string& lang_code)
 {
-    if (long_error_code.empty())
+    if (long_error_code.empty() || is_auto_ignored_hms_error_code(long_error_code))
     {
         return wxEmptyString;
     }
@@ -394,6 +403,10 @@ bool HMSQuery::_is_internal_error(const string &dev_id_type,
                                   const string &error_code,
                                   const string &lang_code)
 {
+    if (is_auto_ignored_hms_error_code(error_code)) {
+        return true;
+    }
+
     init_hms_info(dev_id_type);
     auto iter = m_hms_info_jsons.find(dev_id_type);
     if (iter == m_hms_info_jsons.end()) { return false; }
@@ -427,6 +440,10 @@ wxString HMSQuery::_query_error_msg(const std::string &dev_id_type,
                                     const std::string& error_code,
                                     const std::string& lang_code)
 {
+    if (is_auto_ignored_hms_error_code(error_code)) {
+        return wxEmptyString;
+    }
+
     init_hms_info(dev_id_type);
     auto iter = m_hms_info_jsons.find(dev_id_type);
     if (iter == m_hms_info_jsons.end())
@@ -544,6 +561,9 @@ wxString HMSQuery::query_print_image_action(const MachineObject* obj, int print_
 
     char buf[32];
     ::sprintf(buf, "%08X", print_error);
+    if (is_auto_ignored_hms_error_code(std::string(buf))) {
+        return wxEmptyString;
+    }
     //The first three digits of SN number
     const auto result = _query_error_image_action(get_dev_id_type(obj),std::string(buf), button_action);
     if (wxGetApp().app_config->get_stealth_mode() && result.Contains("http")) {

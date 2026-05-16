@@ -745,6 +745,7 @@ public:
     // 01.10.01.50 when the legacy network plugin lacks get_my_token support
     // so the auth server stays on the ?access_token= redirect path.
     std::string     get_bbl_client_version();
+    std::map<std::string, std::string> get_extra_header();
 
 private:
     int             updating_bambu_networking();

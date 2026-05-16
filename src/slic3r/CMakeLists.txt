@@ -568,6 +568,7 @@ set(SLIC3R_GUI_SOURCES
     Utils/AstroBox.cpp
     Utils/AstroBox.hpp
     Utils/bambu_networking.hpp
+    Utils/PJarczakLinuxBridge/PJarczakLinuxBridgeConfig.cpp
     Utils/Bonjour.cpp
     Utils/Bonjour.hpp
     Utils/CalibUtils.cpp
@@ -663,6 +664,7 @@ set(SLIC3R_GUI_SOURCES
 
 add_subdirectory(GUI/DeviceCore)
 add_subdirectory(GUI/DeviceTab)
+add_subdirectory(Utils/PJarczakLinuxBridge)
 
 if (WIN32)
     list(APPEND SLIC3R_GUI_SOURCES
@@ -686,12 +688,17 @@ if (APPLE)
             GUI/GUI_UtilsMac.mm
             GUI/wxMediaCtrl2.mm
             GUI/wxMediaCtrl2.h
+            GUI/wxMediaCtrl3.h
         )
     FIND_LIBRARY(DISKARBITRATION_LIBRARY DiskArbitration)
 else ()
     list(APPEND SLIC3R_GUI_SOURCES
+            GUI/AVVideoDecoder.cpp
+            GUI/AVVideoDecoder.hpp
             GUI/wxMediaCtrl2.cpp
             GUI/wxMediaCtrl2.h
+            GUI/wxMediaCtrl3.cpp
+            GUI/wxMediaCtrl3.h
         )
 endif ()
 
@@ -750,7 +757,13 @@ target_link_libraries(libslic3r_gui libslic3r cereal::cereal imgui imguizmo mini
 
 
 if (MSVC)
-    target_link_libraries(libslic3r_gui Setupapi.lib)
+    find_library(FFMPEG_AVCODEC_LIB NAMES avcodec avcodec-61 PATHS ${CMAKE_PREFIX_PATH} PATH_SUFFIXES lib NO_DEFAULT_PATH)
+    find_library(FFMPEG_AVUTIL_LIB  NAMES avutil avutil-59 PATHS ${CMAKE_PREFIX_PATH} PATH_SUFFIXES lib NO_DEFAULT_PATH)
+    find_library(FFMPEG_SWSCALE_LIB NAMES swscale swscale-8 PATHS ${CMAKE_PREFIX_PATH} PATH_SUFFIXES lib NO_DEFAULT_PATH)
+    if (NOT FFMPEG_AVCODEC_LIB OR NOT FFMPEG_AVUTIL_LIB OR NOT FFMPEG_SWSCALE_LIB)
+        message(FATAL_ERROR "Missing FFmpeg import libs for Windows build. Expected avcodec/avutil/swscale under ${CMAKE_PREFIX_PATH}/lib")
+    endif ()
+    target_link_libraries(libslic3r_gui Setupapi.lib dwmapi.lib ${FFMPEG_AVCODEC_LIB} ${FFMPEG_AVUTIL_LIB} ${FFMPEG_SWSCALE_LIB})
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     FIND_LIBRARY(WAYLAND_SERVER_LIBRARIES NAMES wayland-server)
     FIND_LIBRARY(WAYLAND_EGL_LIBRARIES    NAMES wayland-egl)
@@ -797,7 +810,15 @@ if (UNIX AND NOT APPLE)
     find_package(PkgConfig REQUIRED)
     find_package(GTK${SLIC3R_GTK} REQUIRED)
     pkg_check_modules(LIBSECRET REQUIRED libsecret-1)
-    pkg_check_modules(webkit2gtk REQUIRED webkit2gtk-4.1)
+    pkg_check_modules(WEBKIT2GTK41 QUIET webkit2gtk-4.1)
+    if (WEBKIT2GTK41_FOUND)
+        set(webkit2gtk_INCLUDE_DIRS ${WEBKIT2GTK41_INCLUDE_DIRS})
+        set(webkit2gtk_LIBRARIES ${WEBKIT2GTK41_LIBRARIES})
+    else()
+        pkg_check_modules(WEBKIT2GTK40 REQUIRED webkit2gtk-4.0)
+        set(webkit2gtk_INCLUDE_DIRS ${WEBKIT2GTK40_INCLUDE_DIRS})
+        set(webkit2gtk_LIBRARIES ${WEBKIT2GTK40_LIBRARIES})
+    endif()
     if (FLATPAK)
         # I don't know why this is needed, but for whatever reason slic3r isn't
         # linking to X11 and webkit2gtk. force it.
@@ -815,6 +836,13 @@ if (UNIX AND NOT APPLE)
     if (wxHAVE_GDK_WAYLAND)
         target_compile_definitions(libslic3r_gui PRIVATE wxHAVE_GDK_WAYLAND)
     endif ()
+
+    pkg_check_modules(LIBAV REQUIRED IMPORTED_TARGET
+        libavcodec
+        libswscale
+        libavutil
+    )
+    target_link_libraries(libslic3r_gui PkgConfig::LIBAV)
 
     # We add GStreamer for bambu:/// support.
     pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0)

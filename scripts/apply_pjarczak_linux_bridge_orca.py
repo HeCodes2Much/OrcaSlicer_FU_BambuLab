@@ -1,36 +1,33 @@
+
 #!/usr/bin/env python3
 from pathlib import Path
 import sys
 
-
 def read(p: Path) -> str:
-    return p.read_text(encoding="utf-8")
-
+    return p.read_text(encoding='utf-8')
 
 def write(p: Path, s: str) -> None:
-    p.write_text(s, encoding="utf-8")
-
+    p.write_text(s, encoding='utf-8')
 
 def replace_once(s: str, old: str, new: str, path: Path) -> str:
     if old not in s:
         raise RuntimeError(f"missing expected snippet in {path}: {old[:120]!r}")
     return s.replace(old, new, 1)
 
-
 def replace_function_body(s: str, signature: str, new_body: str, path: Path) -> str:
     idx = s.find(signature)
     if idx < 0:
         raise RuntimeError(f"signature not found in {path}: {signature}")
-    brace = s.find("{", idx)
+    brace = s.find('{', idx)
     if brace < 0:
         raise RuntimeError(f"opening brace not found in {path}: {signature}")
     depth = 0
     end = brace
     while end < len(s):
         ch = s[end]
-        if ch == "{":
+        if ch == '{':
             depth += 1
-        elif ch == "}":
+        elif ch == '}':
             depth -= 1
             if depth == 0:
                 end += 1
@@ -40,8 +37,7 @@ def replace_function_body(s: str, signature: str, new_body: str, path: Path) -> 
         raise RuntimeError(f"unterminated function body in {path}: {signature}")
     return s[:brace] + new_body + s[end:]
 
-
-BBL_INIT = r"""{
+BBL_INIT = r'''{
     clear_load_error();
 
     std::string library;
@@ -159,9 +155,9 @@ BBL_INIT = r"""{
         << ", start_local_print=" << (m_start_local_print ? "loaded" : "null");
 
     return 0;
-}"""
+}'''
 
-BBL_UNLOAD = r"""{
+BBL_UNLOAD = r'''{
     UnloadFTModule();
 
 #if defined(_MSC_VER) || defined(_WIN32)
@@ -190,9 +186,9 @@ BBL_UNLOAD = r"""{
     clear_all_function_pointers();
 
     return 0;
-}"""
+}'''
 
-BBL_SOURCE = r"""{
+BBL_SOURCE = r'''{
     if ((m_source_module) || (!m_networking_module))
         return m_source_module;
 
@@ -232,9 +228,9 @@ BBL_SOURCE = r"""{
 #endif
 
     return m_source_module;
-}"""
+}'''
 
-GUI_DOWNLOAD = r"""{
+GUI_DOWNLOAD = r'''{
     int result = 0;
     std::string err_msg;
 
@@ -358,9 +354,9 @@ GUI_DOWNLOAD = r"""{
 
     http.perform_sync();
     return result;
-}"""
+}'''
 
-GUI_INSTALL = r"""{
+GUI_INSTALL = r'''{
     bool cancel = false;
     std::string target_file_path = (fs::temp_directory_path() / package_name).string();
 
@@ -519,9 +515,9 @@ GUI_INSTALL = r"""{
         app_config->set_bool("installed_networking", true);
     BOOST_LOG_TRIVIAL(info) << "[install_plugin] success";
     return 0;
-}"""
+}'''
 
-GUI_COPY = r"""{
+GUI_COPY = r'''{
     if (app_config->get("update_network_plugin") != "true")
         return;
 
@@ -651,28 +647,26 @@ GUI_COPY = r"""{
     if (boost::filesystem::exists(changelog_file))
         fs::remove(changelog_file);
     app_config->set("update_network_plugin", "false");
-}"""
-
+}'''
 
 def patch_cmake(repo: Path):
     path = repo / "src/slic3r/CMakeLists.txt"
     s = read(path)
-    if "add_subdirectory(Utils/PJarczakLinuxBridge)" not in s:
+    if 'add_subdirectory(Utils/PJarczakLinuxBridge)' not in s:
         s = replace_once(
             s,
-            "add_subdirectory(GUI/DeviceCore)\nadd_subdirectory(GUI/DeviceTab)\n",
-            "add_subdirectory(GUI/DeviceCore)\nadd_subdirectory(GUI/DeviceTab)\nadd_subdirectory(Utils/PJarczakLinuxBridge)\n",
-            path,
+            'add_subdirectory(GUI/DeviceCore)\nadd_subdirectory(GUI/DeviceTab)\n',
+            'add_subdirectory(GUI/DeviceCore)\nadd_subdirectory(GUI/DeviceTab)\nadd_subdirectory(Utils/PJarczakLinuxBridge)\n',
+            path
         )
-    if "Utils/PJarczakLinuxBridge/PJarczakLinuxBridgeConfig.cpp" not in s:
+    if 'Utils/PJarczakLinuxBridge/PJarczakLinuxBridgeConfig.cpp' not in s:
         s = replace_once(
             s,
-            "    Utils/bambu_networking.hpp\n",
-            "    Utils/bambu_networking.hpp\n    Utils/PJarczakLinuxBridge/PJarczakLinuxBridgeConfig.cpp\n",
-            path,
+            '    Utils/bambu_networking.hpp\n',
+            '    Utils/bambu_networking.hpp\n    Utils/PJarczakLinuxBridge/PJarczakLinuxBridgeConfig.cpp\n',
+            path
         )
     write(path, s)
-
 
 def patch_plugin_cpp(repo: Path):
     path = repo / "src/slic3r/Utils/BBLNetworkPlugin.cpp"
@@ -682,54 +676,27 @@ def patch_plugin_cpp(repo: Path):
             s,
             '#include "NetworkAgent.hpp"\n',
             '#include "NetworkAgent.hpp"\n#include "PJarczakLinuxBridge/PJarczakLinuxBridgeConfig.hpp"\n',
-            path,
+            path
         )
-    s = replace_function_body(
-        s,
-        "int BBLNetworkPlugin::initialize(bool using_backup, const std::string& version)\n",
-        BBL_INIT,
-        path,
-    )
-    s = replace_function_body(s, "int BBLNetworkPlugin::unload()\n", BBL_UNLOAD, path)
-    s = replace_function_body(
-        s,
-        "#if defined(_MSC_VER) || defined(_WIN32)\nHMODULE BBLNetworkPlugin::get_source_module()\n#else\nvoid* BBLNetworkPlugin::get_source_module()\n#endif\n",
-        BBL_SOURCE,
-        path,
-    )
+    s = replace_function_body(s, 'int BBLNetworkPlugin::initialize(bool using_backup, const std::string& version)\n', BBL_INIT, path)
+    s = replace_function_body(s, 'int BBLNetworkPlugin::unload()\n', BBL_UNLOAD, path)
+    s = replace_function_body(s, '#if defined(_MSC_VER) || defined(_WIN32)\nHMODULE BBLNetworkPlugin::get_source_module()\n#else\nvoid* BBLNetworkPlugin::get_source_module()\n#endif\n', BBL_SOURCE, path)
     write(path, s)
-
 
 def patch_gui_app(repo: Path):
     path = repo / "src/slic3r/GUI/GUI_App.cpp"
     s = read(path)
-    if (
-        '#include "slic3r/Utils/PJarczakLinuxBridge/PJarczakLinuxBridgeConfig.hpp"\n'
-        not in s
-    ):
+    if '#include "slic3r/Utils/PJarczakLinuxBridge/PJarczakLinuxBridgeConfig.hpp"\n' not in s:
         s = replace_once(
             s,
             '#include "slic3r/Utils/bambu_networking.hpp"\n',
             '#include "slic3r/Utils/bambu_networking.hpp"\n#include "slic3r/Utils/PJarczakLinuxBridge/PJarczakLinuxBridgeConfig.hpp"\n',
-            path,
+            path
         )
-    s = replace_function_body(
-        s,
-        "int GUI_App::download_plugin(std::string name, std::string package_name, InstallProgressFn pro_fn, WasCancelledFn cancel_fn)\n",
-        GUI_DOWNLOAD,
-        path,
-    )
-    s = replace_function_body(
-        s,
-        "int GUI_App::install_plugin(std::string name, std::string package_name, InstallProgressFn pro_fn, WasCancelledFn cancel_fn)\n",
-        GUI_INSTALL,
-        path,
-    )
-    s = replace_function_body(
-        s, "void GUI_App::copy_network_if_available()\n", GUI_COPY, path
-    )
+    s = replace_function_body(s, 'int GUI_App::download_plugin(std::string name, std::string package_name, InstallProgressFn pro_fn, WasCancelledFn cancel_fn)\n', GUI_DOWNLOAD, path)
+    s = replace_function_body(s, 'int GUI_App::install_plugin(std::string name, std::string package_name, InstallProgressFn pro_fn, WasCancelledFn cancel_fn)\n', GUI_INSTALL, path)
+    s = replace_function_body(s, 'void GUI_App::copy_network_if_available()\n', GUI_COPY, path)
     write(path, s)
-
 
 def main():
     if len(sys.argv) != 2:
@@ -741,7 +708,6 @@ def main():
     patch_plugin_cpp(repo)
     patch_gui_app(repo)
     print("patched:", repo)
-
 
 if __name__ == "__main__":
     main()

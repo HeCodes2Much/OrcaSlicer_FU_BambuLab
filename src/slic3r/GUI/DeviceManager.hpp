@@ -402,6 +402,7 @@ public:
     bool    is_system_printing();
 
     int     print_error;
+    int     last_auto_ignored_print_error_ = 0;
     static std::string get_error_code_str(int error_code);
     std::string get_print_error_str() const { return MachineObject::get_error_code_str(this->print_error); }
 

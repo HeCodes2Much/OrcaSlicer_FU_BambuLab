@@ -596,6 +596,26 @@ wxSize wxMediaCtrl2::DoGetBestSize() const
     return {-1, -1};
 }
 
+void wxMediaCtrl2::SetIdleImage(wxString const & /*image*/) {}
+
+void wxMediaCtrl2::DoSetSize(int x, int y, int width, int height, int sizeFlags)
+{
+#ifdef __WXMAC__
+    wxWindow::DoSetSize(x, y, width, height, sizeFlags);
+#else
+    wxMediaCtrl::DoSetSize(x, y, width, height, sizeFlags);
+#endif
+#if defined(__LINUX__) && defined(__WXGTK__)
+    if (m_gtk_video_window) {
+        const wxSize client_size = GetClientSize();
+        m_gtk_video_window->SetSize(0, 0, client_size.GetWidth(), client_size.GetHeight());
+    }
+#endif
+    if (sizeFlags & wxSIZE_USE_EXISTING)
+        return;
+    wxMediaCtrl_OnSize(this, m_video_size, width, height);
+}
+
 #ifdef __WIN32__
 
 WXLRESULT wxMediaCtrl2::MSWWindowProc(WXUINT   nMsg,

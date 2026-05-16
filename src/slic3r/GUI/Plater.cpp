@@ -5437,6 +5437,9 @@ Plater::priv::priv(Plater *q, MainFrame *main_frame)
 
 Plater::priv::~priv()
 {
+    partplate_list.detach_plater();
+    partplate_list.clear(true, true);
+
     if (config != nullptr)
         delete config;
     // Saves the database of visited (already shown) hints into hints.ini.
@@ -10409,7 +10412,7 @@ void Plater::priv::update_plugin_when_launch(wxCommandEvent &event)
     std::string data_dir_str = data_dir();
     boost::filesystem::path data_dir_path(data_dir_str);
     auto cache_folder = data_dir_path / "ota";
-    std::string changelog_file = cache_folder.string() + "/plugins/network_plugins.json";
+    std::string changelog_file = cache_folder.string() + "/network_plugins.json";
 
     UpdatePluginDialog dlg(wxGetApp().mainframe);
     dlg.update_info(changelog_file);

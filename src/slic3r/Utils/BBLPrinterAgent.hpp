@@ -5,6 +5,7 @@
 #include "ICloudServiceAgent.hpp"
 #include <string>
 #include <memory>
+#include <mutex>
 
 namespace Slic3r {
 
@@ -83,8 +84,40 @@ public:
     int set_queue_on_main_fn(QueueOnMainFn fn) override;
     FilamentSyncMode get_filament_sync_mode() const override;
 
+    bool retry_last_print_request(const std::string& dev_id);
+
 private:
+    enum class LastPrintRequestType {
+        none,
+        start_print,
+        start_local_print_with_record,
+        start_local_print,
+        start_sdcard_print,
+    };
+
+    struct LastPrintRequest {
+        LastPrintRequestType type = LastPrintRequestType::none;
+        PrintParams params;
+        OnUpdateStatusFn update_fn = nullptr;
+        WasCancelledFn cancel_fn = nullptr;
+        OnWaitFn wait_fn = nullptr;
+        bool retry_used = false;
+    };
+
+    int invoke_print_request_untracked(LastPrintRequestType type,
+                                       PrintParams params,
+                                       OnUpdateStatusFn update_fn,
+                                       WasCancelledFn cancel_fn,
+                                       OnWaitFn wait_fn);
+    void remember_last_print_request(LastPrintRequestType type,
+                                     const PrintParams& params,
+                                     OnUpdateStatusFn update_fn,
+                                     WasCancelledFn cancel_fn,
+                                     OnWaitFn wait_fn);
+
     std::shared_ptr<ICloudServiceAgent> m_cloud_agent;
+    mutable std::mutex m_last_print_request_mutex;
+    LastPrintRequest m_last_print_request;
 };
 
 } // namespace Slic3r

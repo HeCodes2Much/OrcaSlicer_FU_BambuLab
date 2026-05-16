@@ -737,8 +737,6 @@ add_custom_target(gettext_merge_po_with_pot
 )
 file(GLOB BBL_L10N_PO_FILES "${BBL_L18N_DIR}/*/OrcaSlicer*.po")
 foreach(po_file ${BBL_L10N_PO_FILES})
-    GET_FILENAME_COMPONENT(po_dir "${po_file}" DIRECTORY)
-    SET(po_new_file "${po_dir}/OrcaSlicer_.po")
     add_custom_command(
         TARGET gettext_merge_po_with_pot PRE_BUILD
         COMMAND ${GETTEXT_MSGMERGE_EXECUTABLE} -N -o "${po_file}" "${po_file}" "${BBL_L18N_DIR}/OrcaSlicer.pot"

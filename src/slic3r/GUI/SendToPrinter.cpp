@@ -795,6 +795,9 @@ void SendToPrinterDialog::init_timer()
 
 void SendToPrinterDialog::on_cancel(wxCloseEvent &event)
 {
+    if (auto* dev = Slic3r::GUI::wxGetApp().getDeviceManager()) {
+        dev->set_auto_retry_print_ui_callback(nullptr);
+    }
     m_worker->cancel_all();
 
     if (m_task_timer && m_task_timer->IsRunning()) {
@@ -832,6 +835,35 @@ void SendToPrinterDialog::on_ok(wxCommandEvent &event)
     assert(obj_->get_dev_id() == m_printer_last_select);
 
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ", print_job: for send task, current printer id =  " << m_printer_last_select << std::endl;
+    if (!m_is_auto_retry_0500_409d_invoke) {
+        m_auto_retry_0500_409d_used = false;
+    }
+    m_is_auto_retry_0500_409d_invoke = false;
+    if (dev) {
+        dev->set_auto_retry_print_ui_callback([token = std::weak_ptr<int>(m_token), this](const std::string& dev_id) {
+            if (token.expired()) {
+                return false;
+            }
+            if (!dev_id.empty() && dev_id != m_printer_last_select) {
+                return false;
+            }
+            if (m_auto_retry_0500_409d_used) {
+                return false;
+            }
+            m_auto_retry_0500_409d_used = true;
+            m_is_auto_retry_0500_409d_invoke = true;
+            CallAfter([token, this]() {
+                if (token.expired()) {
+                    return;
+                }
+                m_is_canceled = false;
+                prepare_mode();
+                wxCommandEvent evt(wxEVT_BUTTON);
+                on_ok(evt);
+            });
+            return true;
+        });
+    }
     show_status(PrintDialogStatus::PrintStatusSending);
 
     m_status_bar->reset();
@@ -1057,8 +1089,10 @@ void SendToPrinterDialog::on_refresh(wxCommandEvent &event)
 void SendToPrinterDialog::on_print_job_cancel(wxCommandEvent &evt)
 {
     BOOST_LOG_TRIVIAL(info) << "print_job: canceled";
+    if (auto* dev = Slic3r::GUI::wxGetApp().getDeviceManager()) {
+        dev->set_auto_retry_print_ui_callback(nullptr);
+    }
     show_status(PrintDialogStatus::PrintStatusSendingCanceled);
-    // enter prepare mode
     prepare_mode();
 }
 
@@ -1989,6 +2023,9 @@ void SendToPrinterDialog::UploadFileRessultCallback(int res, int resp_ec, std::s
 }
 
 void SendToPrinterDialog::Reset() {
+    if (auto* dev = Slic3r::GUI::wxGetApp().getDeviceManager()) {
+        dev->set_auto_retry_print_ui_callback(nullptr);
+    }
     if (m_url_timer && m_url_timer->IsRunning()) { m_url_timer->Stop(); }
     m_ability_list.clear();
     update_storage_list(std::vector<std::string>());
@@ -2000,6 +2037,9 @@ void SendToPrinterDialog::Reset() {
 
 SendToPrinterDialog::~SendToPrinterDialog()
 {
+    if (auto* dev = Slic3r::GUI::wxGetApp().getDeviceManager()) {
+        dev->set_auto_retry_print_ui_callback(nullptr);
+    }
     delete m_refresh_timer;
     if (m_task_timer && m_task_timer->IsRunning())
         m_task_timer->Stop();

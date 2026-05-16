@@ -1,4 +1,5 @@
 #include "ExportPresetBundleDialog.hpp"
+#include "BBLCloudServiceAgent.hpp"
 #include "OrcaCloudServiceAgent.hpp"
 #include "libslic3r/Technologies.hpp"
 #include "GUI_App.hpp"
@@ -127,6 +128,7 @@
 #include "slic3r/Utils/NetworkAgentFactory.hpp"
 #include "slic3r/Utils/BBLNetworkPlugin.hpp"
 #include "slic3r/Utils/bambu_networking.hpp"
+#include "slic3r/Utils/PJarczakLinuxBridge/PJarczakLinuxBridgeConfig.hpp"
 
 //#ifdef WIN32
 //#include "BaseException.h"
@@ -247,6 +249,26 @@ std::string VersionInfo::convert_short_version(std::string full_version)
 {
     full_version.erase(std::remove(full_version.begin(), full_version.end(), '0'), full_version.end());
     return full_version;
+}
+
+static void pjarczak_verify_or_install_windows_bridge_runtime(const boost::filesystem::path& plugin_folder,
+                                                              const boost::filesystem::path& plugin_cache_dir);
+static void pjarczak_verify_or_install_macos_bridge_runtime(const boost::filesystem::path& plugin_folder,
+                                                            const boost::filesystem::path& plugin_cache_dir);
+static long pjarczak_run_hidden_windows_command(const wxString& command, wxArrayString* stdout_lines, wxArrayString* stderr_lines);
+static void pjarczak_log_command_output(const char* tag, long exit_code, const wxArrayString& stdout_lines, const wxArrayString& stderr_lines);
+
+static std::string convert_studio_language_to_api(std::string lang_code)
+{
+    boost::replace_all(lang_code, "_", "-");
+    return lang_code;
+
+    /*if (lang_code == "zh_CN")
+        return "zh-hans";
+    else if (lang_code == "zh_TW")
+        return "zh-hant";
+    else
+        return "en";*/
 }
 
 #ifdef _WIN32
@@ -1008,10 +1030,6 @@ GUI_App::GUI_App()
 	//app config initializes early becasuse it is used in instance checking in OrcaSlicer.cpp
     this->init_app_config();
     this->init_download_path();
-#if wxUSE_WEBVIEW_EDGE
-    this->init_webview_runtime();
-#endif
-
     reset_to_active();
 }
 
@@ -1093,15 +1111,7 @@ std::string GUI_App::get_plugin_url(std::string name, std::string country_code)
 {
     std::string url = get_http_url(country_code);
 
-    std::string curr_version;
-    if (NetworkAgent::use_legacy_network) {
-        curr_version = BAMBU_NETWORK_AGENT_VERSION_LEGACY;
-    } else if (name == "plugins" && app_config) {
-        std::string user_version = app_config->get_network_plugin_version();
-        curr_version = user_version.empty() ? get_latest_network_version() : user_version;
-    } else {
-        curr_version = get_latest_network_version();
-    }
+    std::string curr_version = get_latest_network_version();
 
     std::string using_version = curr_version.substr(0, 9) + "00";
     if (name == "cameratools")
@@ -1128,38 +1138,56 @@ static std::string decode(std::string const& extra, std::string const& path = {}
 int GUI_App::download_plugin(std::string name, std::string package_name, InstallProgressFn pro_fn, WasCancelledFn cancel_fn)
 {
     int result = 0;
-    json j;
     std::string err_msg;
 
-    // get country_code
     AppConfig* app_config = wxGetApp().app_config;
     if (!app_config) {
-        j["result"] = "failed";
-        j["error_msg"] = "app_config is nullptr";
         return -1;
     }
 
-    BOOST_LOG_TRIVIAL(info) << "[download_plugin]: enter";
     m_networking_cancel_update = false;
-    // get temp path
     fs::path target_file_path = (fs::temp_directory_path() / package_name);
     fs::path tmp_path = target_file_path;
     tmp_path += format(".%1%%2%", get_current_pid(), ".tmp");
 
+    const bool pj_force_linux_payload = Slic3r::PJarczakLinuxBridge::should_force_linux_plugin_payload(name);
+#if defined(__LINUX__)
+    const bool pj_force_bambustudio_headers = pj_force_linux_payload || name == "plugins";
+#else
+    const bool pj_force_bambustudio_headers = pj_force_linux_payload;
+#endif
     // Determine OS type for plugin download (must be set per-request since global
     // extra headers are no longer initialised on this branch).
 #if defined(__WINDOWS__)
-    std::string os_type = (is_running_on_arm64() && !NetworkAgent::use_legacy_network) ? "windows_arm" : "windows";
+    std::string os_type = pj_force_bambustudio_headers ? Slic3r::PJarczakLinuxBridge::forced_download_os_type()
+        : ((is_running_on_arm64() && !NetworkAgent::use_legacy_network) ? "windows_arm" : "windows");
 #elif defined(__APPLE__)
-    std::string os_type = "macos";
+    std::string os_type = pj_force_bambustudio_headers ? Slic3r::PJarczakLinuxBridge::forced_download_os_type() : "macos";
 #elif defined(__linux__)
     std::string os_type = "linux";
 #else
     std::string os_type = "windows";
 #endif
+    std::map<std::string, std::string> saved_headers = Slic3r::Http::get_extra_headers();
+    bool changed_headers = false;
 
-    // get_url
-    std::string  url = get_plugin_url(name, app_config->get_country_code());
+    auto restore_headers = [&]() {
+        if (changed_headers) {
+            Slic3r::Http::set_extra_headers(saved_headers);
+            changed_headers = false;
+        }
+    };
+
+    if (pj_force_bambustudio_headers) {
+        auto headers = saved_headers;
+        headers["X-BBL-OS-Type"] = Slic3r::PJarczakLinuxBridge::forced_download_os_type();
+        headers["X-BBL-Client-Name"] = "BambuStudio";
+        headers["X-BBL-Client-Version"] = Slic3r::PJarczakLinuxBridge::forced_client_version();
+        Slic3r::Http::set_extra_headers(headers);
+        changed_headers = true;
+    }
+
+    std::string url = get_plugin_url(name, app_config->get_country_code());
     std::string download_url;
     Slic3r::Http http_url = Slic3r::Http::get(url);
     BOOST_LOG_TRIVIAL(info) << "[download_plugin]: check the plugin from " << url;
@@ -1167,84 +1195,52 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
         .timeout_max(TIMEOUT_RESPONSE)
         .header("X-BBL-OS-Type", os_type)
         .on_complete(
-        [&download_url](std::string body, unsigned status) {
-            try {
-                json j = json::parse(body);
-                std::string message = j["message"].get<std::string>();
-
-                if (message == "success") {
-                    json resource = j.at("resources");
-                    if (resource.is_array()) {
-                        for (auto iter = resource.begin(); iter != resource.end(); iter++) {
-                            Semver version;
-                            std::string url;
-                            std::string type;
-                            std::string vendor;
-                            std::string description;
-                            for (auto sub_iter = iter.value().begin(); sub_iter != iter.value().end(); sub_iter++) {
-                                if (boost::iequals(sub_iter.key(), "type")) {
-                                    type = sub_iter.value();
-                                    BOOST_LOG_TRIVIAL(info) << "[download_plugin]: get version of settings's type, " << sub_iter.value();
-                                }
-                                else if (boost::iequals(sub_iter.key(), "version")) {
-                                    version = *(Semver::parse(sub_iter.value()));
-                                }
-                                else if (boost::iequals(sub_iter.key(), "description")) {
-                                    description = sub_iter.value();
-                                }
-                                else if (boost::iequals(sub_iter.key(), "url")) {
-                                    url = sub_iter.value();
+            [&download_url](std::string body, unsigned status) {
+                try {
+                    json j = json::parse(body);
+                    std::string message = j["message"].get<std::string>();
+                    if (message == "success") {
+                        json resource = j.at("resources");
+                        if (resource.is_array()) {
+                            for (auto iter = resource.begin(); iter != resource.end(); iter++) {
+                                for (auto sub_iter = iter.value().begin(); sub_iter != iter.value().end(); sub_iter++) {
+                                    if (boost::iequals(sub_iter.key(), "url"))
+                                        download_url = sub_iter.value();
                                 }
                             }
-                            BOOST_LOG_TRIVIAL(info) << "[download_plugin 1]: get type " << type << ", version " << version.to_string() << ", url " << url;
-                            download_url = url;
                         }
                     }
-                }
-                else {
-                    BOOST_LOG_TRIVIAL(info) << "[download_plugin 1]: get version of plugin failed, body=" << body;
-                }
-            }
-            catch (...) {
-                BOOST_LOG_TRIVIAL(error) << "[download_plugin 1]: catch unknown exception";
-                ;
-            }
-        }).on_error(
+                } catch (...) {}
+            })
+        .on_error(
             [&result, &err_msg](std::string body, std::string error, unsigned int status) {
-                BOOST_LOG_TRIVIAL(error) << "[download_plugin 1] on_error: " << error<<", body = " << body;
+                BOOST_LOG_TRIVIAL(error) << "[download_plugin 1] on_error: " << error << ", body = " << body;
                 err_msg += "[download_plugin 1] on_error: " + error + ", body = " + body;
                 result = -1;
-        }).perform_sync();
+            })
+        .perform_sync();
+
+    restore_headers();
 
     bool cancel = false;
     if (result < 0) {
-        j["result"] = "failed";
-        j["error_msg"] = err_msg;
         if (pro_fn) pro_fn(InstallStatusDownloadFailed, 0, cancel);
         return result;
     }
 
-
     if (download_url.empty()) {
-        BOOST_LOG_TRIVIAL(info) << "[download_plugin 1]: no available plugin found for this app version: " << SLIC3R_VERSION;
         if (pro_fn) pro_fn(InstallStatusDownloadFailed, 0, cancel);
-        j["result"] = "failed";
-        j["error_msg"] = "[download_plugin 1]: no available plugin found for this app version: " + std::string(SLIC3R_VERSION);
         return -1;
-    }
-    else if (pro_fn) {
+    } else if (pro_fn) {
         pro_fn(InstallStatusNormal, 5, cancel);
     }
 
     if (m_networking_cancel_update || cancel) {
-        BOOST_LOG_TRIVIAL(info) << boost::format("[download_plugin 1]: %1%, cancelled by user") % __LINE__;
-        j["result"] = "failed";
-        j["error_msg"] = (boost::format("[download_plugin 1]: %1%, cancelled by user") % __LINE__).str();
         return -1;
     }
+
     BOOST_LOG_TRIVIAL(info) << "[download_plugin] get_url = " << download_url;
 
-    // download
     Slic3r::Http http = Slic3r::Http::get(download_url);
     int reported_percent = 0;
     http.header("X-BBL-OS-Type", os_type)
@@ -1260,35 +1256,30 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
                 BOOST_LOG_TRIVIAL(info) << "[download_plugin 2] progress: " << reported_percent;
             }
             cancel = m_networking_cancel_update || was_cancel;
-            if (cancel_fn)
-                if (cancel_fn())
+            if (cancel_fn && cancel_fn())
                     cancel = true;
-
-            if (cancel) {
-                err_msg += "[download_plugin] cancel";
-                result = -1;
-            }
-        })
+                if (cancel) {
+                    err_msg += "[download_plugin] cancel";
+                    result = -1;
+                }
+            })
         .on_complete([&pro_fn, tmp_path, target_file_path](std::string body, unsigned status) {
-            BOOST_LOG_TRIVIAL(info) << "[download_plugin 2] completed";
             bool cancel = false;
-            int percent = 0;
             fs::fstream file(tmp_path, std::ios::out | std::ios::binary | std::ios::trunc);
             file.write(body.c_str(), body.size());
             file.close();
             fs::rename(tmp_path, target_file_path);
             if (pro_fn) pro_fn(InstallStatusDownloadCompleted, 80, cancel);
-            })
+        })
         .on_error([&pro_fn, &result, &err_msg](std::string body, std::string error, unsigned int status) {
             bool cancel = false;
             if (pro_fn) pro_fn(InstallStatusDownloadFailed, 0, cancel);
-            BOOST_LOG_TRIVIAL(error) << "[download_plugin 2] on_error: " << error<<", body = " << body;
+            BOOST_LOG_TRIVIAL(error) << "[download_plugin 2] on_error: " << error << ", body = " << body;
             err_msg += "[download_plugin 2] on_error: " + error + ", body = " + body;
             result = -1;
         });
+
     http.perform_sync();
-    j["result"] = result < 0 ? "failed" : "success";
-    j["error_msg"] = err_msg;
     return result;
 }
 
@@ -1298,175 +1289,118 @@ int GUI_App::install_plugin(std::string name, std::string package_name, InstallP
     std::string target_file_path = (fs::temp_directory_path() / package_name).string();
 
     BOOST_LOG_TRIVIAL(info) << "[install_plugin] enter";
-    // get plugin folder
     std::string data_dir_str = data_dir();
     boost::filesystem::path data_dir_path(data_dir_str);
     auto plugin_folder = data_dir_path / name;
-    //auto plugin_folder = boost::filesystem::path(wxStandardPaths::Get().GetUserDataDir().ToUTF8().data()) / "plugins";
-    auto backup_folder = plugin_folder/"backup";
-    if (!boost::filesystem::exists(plugin_folder)) {
-        BOOST_LOG_TRIVIAL(info) << "[install_plugin] will create directory "<<plugin_folder.string();
+    auto backup_folder = plugin_folder / "backup";
+    if (!boost::filesystem::exists(plugin_folder))
         boost::filesystem::create_directory(plugin_folder);
-    }
-    if (!boost::filesystem::exists(backup_folder)) {
-        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(", will create directory %1%")%backup_folder.string();
+    if (!boost::filesystem::exists(backup_folder))
         boost::filesystem::create_directory(backup_folder);
-    }
 
-    if (m_networking_cancel_update) {
-        BOOST_LOG_TRIVIAL(info) << boost::format("[install_plugin]: %1%, cancelled by user")%__LINE__;
+    if (m_networking_cancel_update)
         return -1;
-    }
-    if (pro_fn) {
+    if (pro_fn)
         pro_fn(InstallStatusNormal, 50, cancel);
-    }
-    // unzip
+
     mz_zip_archive archive;
     mz_zip_zero_struct(&archive);
     if (!open_zip_reader(&archive, target_file_path)) {
-        BOOST_LOG_TRIVIAL(error) << boost::format("[install_plugin]: %1%, open zip file failed")%__LINE__;
         if (pro_fn) pro_fn(InstallStatusDownloadFailed, 0, cancel);
         return InstallStatusUnzipFailed;
     }
 
-    boost::filesystem::path legacy_lib_path, legacy_lib_backup;
-    bool had_existing_legacy = false;
-    if (name == "plugins") {
-#if defined(_MSC_VER) || defined(_WIN32)
-        legacy_lib_path = plugin_folder / (std::string(BAMBU_NETWORK_LIBRARY) + ".dll");
-#elif defined(__WXMAC__)
-        legacy_lib_path = plugin_folder / (std::string("lib") + std::string(BAMBU_NETWORK_LIBRARY) + ".dylib");
-#else
-        legacy_lib_path = plugin_folder / (std::string("lib") + std::string(BAMBU_NETWORK_LIBRARY) + ".so");
-#endif
-        legacy_lib_backup = legacy_lib_path;
-        legacy_lib_backup += ".backup";
-
-        if (boost::filesystem::exists(legacy_lib_path)) {
-            had_existing_legacy = true;
-            boost::system::error_code ec;
-            boost::filesystem::rename(legacy_lib_path, legacy_lib_backup, ec);
-            if (ec) {
-                BOOST_LOG_TRIVIAL(warning) << "[install_plugin] failed to backup existing legacy library: " << ec.message();
-                had_existing_legacy = false;
-            } else {
-                BOOST_LOG_TRIVIAL(info) << "[install_plugin] backed up existing legacy library";
-            }
-        }
-    }
+    const bool pj_force_linux_payload = Slic3r::PJarczakLinuxBridge::should_force_linux_plugin_payload(name);
+    const std::string manifest_name = Slic3r::PJarczakLinuxBridge::linux_payload_manifest_file_name();
 
     mz_uint num_entries = mz_zip_reader_get_num_files(&archive);
     mz_zip_archive_file_stat stat;
-    BOOST_LOG_TRIVIAL(error) << boost::format("[install_plugin]: %1%, got %2% files")%__LINE__ %num_entries;
     for (mz_uint i = 0; i < num_entries; i++) {
         if (m_networking_cancel_update || cancel) {
-            BOOST_LOG_TRIVIAL(info) << boost::format("[install_plugin]: %1%, cancelled by user")%__LINE__;
+            close_zip_reader(&archive);
             return -1;
         }
-        if (mz_zip_reader_file_stat(&archive, i, &stat)) {
-            if (stat.m_uncomp_size > 0) {
-                std::string dest_file;
-                if (stat.m_is_utf8) {
-                    dest_file = stat.m_filename;
-                }
-                else {
-                    std::string extra(1024, 0);
-                    size_t n = mz_zip_reader_get_extra(&archive, stat.m_file_index, extra.data(), extra.size());
-                    dest_file = decode(extra.substr(0, n), stat.m_filename);
-                }
-                auto dest_path = plugin_folder / dest_file;
-                boost::filesystem::create_directories(dest_path.parent_path());
-                std::string dest_zip_file = encode_path(dest_path.string().c_str());
+        if (!mz_zip_reader_file_stat(&archive, i, &stat))
+            continue;
+        if (stat.m_uncomp_size == 0)
+            continue;
+
+        std::string dest_file;
+        if (stat.m_is_utf8) {
+            dest_file = stat.m_filename;
+        } else {
+            std::string extra(1024, 0);
+            size_t n = mz_zip_reader_get_extra(&archive, stat.m_file_index, extra.data(), extra.size());
+            dest_file = decode(extra.substr(0, n), stat.m_filename);
+        }
+
+        boost::filesystem::path relative(dest_file);
+        if (pj_force_linux_payload) {
+            const std::string file_name = relative.filename().string();
+            if (!(file_name == manifest_name || Slic3r::PJarczakLinuxBridge::is_linux_payload_filename(file_name)))
+                continue;
+            relative = boost::filesystem::path(file_name);
+        }
+
+        auto dest_path = plugin_folder / relative;
+        boost::filesystem::create_directories(dest_path.parent_path());
+        std::string dest_zip_file = encode_path(dest_path.string().c_str());
+
+        try {
+            if (fs::exists(dest_path))
+                fs::remove(dest_path);
+            mz_bool res = 0;
+#ifndef WIN32
+            if (S_ISLNK(stat.m_external_attr >> 16)) {
+                std::string link(stat.m_uncomp_size + 1, 0);
+                res = mz_zip_reader_extract_to_mem(&archive, stat.m_file_index, link.data(), stat.m_uncomp_size, 0);
                 try {
-                    if (fs::exists(dest_path))
-                        fs::remove(dest_path);
-                    mz_bool res = 0;
-#ifndef WIN32
-                    if (S_ISLNK(stat.m_external_attr >> 16)) {
-                        std::string link(stat.m_uncomp_size + 1, 0);
-                        res = mz_zip_reader_extract_to_mem(&archive, stat.m_file_index, link.data(), stat.m_uncomp_size, 0);
-                        try {
-                            boost::filesystem::create_symlink(link, dest_path);
-                        } catch (const std::exception &e) {
-                            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " create_symlink:" << e.what();
-                        }
-                    } else {
+                    boost::filesystem::create_symlink(link, dest_path);
+                } catch (const std::exception &) {}
+            } else {
 #endif
-                        res = mz_zip_reader_extract_to_file(&archive, stat.m_file_index, dest_zip_file.c_str(), 0);
+                res = mz_zip_reader_extract_to_file(&archive, stat.m_file_index, dest_zip_file.c_str(), 0);
 #ifndef WIN32
-                    }
+            }
 #endif
-                    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(", extract  %1% from plugin zip %2%\n") % dest_file % stat.m_filename;
-                    if (res == 0) {
+            if (res == 0) {
 #ifdef WIN32
-                        std::wstring new_dest_zip_file = boost::locale::conv::utf_to_utf<wchar_t>(dest_path.generic_string());
-                        res                            = mz_zip_reader_extract_to_file_w(&archive, stat.m_file_index, new_dest_zip_file.c_str(), 0);
+                std::wstring new_dest_zip_file = boost::locale::conv::utf_to_utf<wchar_t>(dest_path.generic_string());
+                res = mz_zip_reader_extract_to_file_w(&archive, stat.m_file_index, new_dest_zip_file.c_str(), 0);
 #endif
-                        if (res == 0) {
-                            mz_zip_error zip_error = mz_zip_get_last_error(&archive);
-                            BOOST_LOG_TRIVIAL(error) << "[install_plugin]Archive read error:" << mz_zip_get_error_string(zip_error) << std::endl;
-                            close_zip_reader(&archive);
-                            if (pro_fn) { pro_fn(InstallStatusUnzipFailed, 0, cancel); }
-                            return InstallStatusUnzipFailed;
-                        }
-                    }
-                }
-                catch (const std::exception& e)
-                {
-                    // ensure the zip archive is closed and rethrow the exception
+                if (res == 0) {
                     close_zip_reader(&archive);
-                    BOOST_LOG_TRIVIAL(error) << "[install_plugin]Archive read exception:"<<e.what();
-                    if (pro_fn) {
-                        pro_fn(InstallStatusUnzipFailed, 0, cancel);
-                    }
+                    if (pro_fn) pro_fn(InstallStatusUnzipFailed, 0, cancel);
                     return InstallStatusUnzipFailed;
                 }
             }
-        }
-        else {
-            BOOST_LOG_TRIVIAL(error) << boost::format("[install_plugin]: %1%, mz_zip_reader_file_stat for file %2% failed")%__LINE__%i;
+
+            if (pj_force_linux_payload && relative.filename().string() != manifest_name) {
+                std::string validate_reason;
+                if (!Slic3r::PJarczakLinuxBridge::validate_linux_payload_file(dest_path.string(), &validate_reason)) {
+                    BOOST_LOG_TRIVIAL(error) << "[install_plugin] linux payload validation failed for " << dest_path.string() << ": " << validate_reason;
+                    close_zip_reader(&archive);
+                    if (pro_fn) pro_fn(InstallStatusUnzipFailed, 0, cancel);
+                    return InstallStatusUnzipFailed;
+                }
+            }
+        } catch (const std::exception &) {
+            close_zip_reader(&archive);
+            if (pro_fn) pro_fn(InstallStatusUnzipFailed, 0, cancel);
+            return InstallStatusUnzipFailed;
         }
     }
 
     close_zip_reader(&archive);
 
-    if (name == "plugins") {
-        std::string config_version = app_config->get_network_plugin_version();
-        if (config_version.empty()) {
-            config_version = get_latest_network_version();
-            BOOST_LOG_TRIVIAL(info) << "[install_plugin] config_version was empty, using latest: " << config_version;
-            app_config->set_network_plugin_version(config_version);
-            GUI::wxGetApp().CallAfter([this] {
-                if (app_config)
-                    app_config->save();
-            });
-        }
-        if (!config_version.empty() && boost::filesystem::exists(legacy_lib_path)) {
-#if defined(_MSC_VER) || defined(_WIN32)
-            auto versioned_lib = plugin_folder / (std::string(BAMBU_NETWORK_LIBRARY) + "_" + config_version + ".dll");
-#elif defined(__WXMAC__)
-            auto versioned_lib = plugin_folder / (std::string("lib") + std::string(BAMBU_NETWORK_LIBRARY) + "_" + config_version + ".dylib");
-#else
-            auto versioned_lib = plugin_folder / (std::string("lib") + std::string(BAMBU_NETWORK_LIBRARY) + "_" + config_version + ".so");
-#endif
-            BOOST_LOG_TRIVIAL(info) << "[install_plugin] renaming newly extracted " << legacy_lib_path.string() << " to " << versioned_lib.string();
-            boost::system::error_code ec;
-            if (boost::filesystem::exists(versioned_lib)) {
-                boost::filesystem::remove(versioned_lib, ec);
-            }
-            boost::filesystem::rename(legacy_lib_path, versioned_lib, ec);
-            if (ec) {
-                BOOST_LOG_TRIVIAL(error) << "[install_plugin] failed to rename to versioned: " << ec.message();
-            }
-        }
-
-        if (had_existing_legacy && boost::filesystem::exists(legacy_lib_backup)) {
-            BOOST_LOG_TRIVIAL(info) << "[install_plugin] restoring backed up legacy library";
-            boost::system::error_code ec;
-            boost::filesystem::rename(legacy_lib_backup, legacy_lib_path, ec);
-            if (ec) {
-                BOOST_LOG_TRIVIAL(warning) << "[install_plugin] failed to restore legacy library backup: " << ec.message();
-            }
+    if (pj_force_linux_payload) {
+        std::string validate_reason;
+        const auto manifest_path = plugin_folder / manifest_name;
+        if (boost::filesystem::exists(manifest_path) &&
+            !Slic3r::PJarczakLinuxBridge::validate_linux_payload_set_against_manifest(plugin_folder, &validate_reason)) {
+            BOOST_LOG_TRIVIAL(error) << "[install_plugin] manifest validation failed: " << validate_reason;
+            if (pro_fn) pro_fn(InstallStatusUnzipFailed, 0, cancel);
+            return InstallStatusUnzipFailed;
         }
     }
 
@@ -1475,34 +1409,33 @@ int GUI_App::install_plugin(std::string name, std::string package_name, InstallP
         if (fs::exists(dir_path) && fs::is_directory(dir_path)) {
             int file_count = 0, file_index = 0;
             for (fs::directory_iterator it(dir_path); it != fs::directory_iterator(); ++it) {
-                if (fs::is_regular_file(it->status())) { ++file_count; }
+                if (it->path().string() == backup_folder.string())
+                    continue;
+                if (fs::is_regular_file(it->status()))
+                    ++file_count;
             }
             for (fs::directory_iterator it(dir_path); it != fs::directory_iterator(); ++it) {
-                BOOST_LOG_TRIVIAL(info) << " current path:" << it->path().string();
-                if (it->path().string() == backup_folder) {
+                if (it->path().string() == backup_folder.string())
                     continue;
-                }
                 auto dest_path = backup_folder.string() + "/" + it->path().filename().string();
                 if (fs::is_regular_file(it->status())) {
-                    BOOST_LOG_TRIVIAL(info) << " copy file:" << it->path().string() << "," << it->path().filename();
                     try {
-                        if (pro_fn) { pro_fn(InstallStatusNormal, 50 + file_index / file_count, cancel); }
-                        file_index++;
-                        if (fs::exists(dest_path)) { fs::remove(dest_path); }
-                        std::string    error_message;
+                        if (file_count > 0 && pro_fn)
+                            pro_fn(InstallStatusNormal, 50 + file_index / file_count, cancel);
+                        ++file_index;
+                        if (fs::exists(dest_path))
+                            fs::remove(dest_path);
+                        std::string error_message;
                         CopyFileResult cfr = copy_file(it->path().string(), dest_path, error_message, false);
-                        if (cfr != CopyFileResult::SUCCESS) { BOOST_LOG_TRIVIAL(error) << "Copying to backup failed(" << cfr << "): " << error_message; }
-                    } catch (const std::exception &e) {
-                        BOOST_LOG_TRIVIAL(error) << "Copying to backup failed: " << e.what();
-                    }
+                        if (cfr != CopyFileResult::SUCCESS)
+                            BOOST_LOG_TRIVIAL(error) << "Copying to backup failed(" << cfr << "): " << error_message;
+                    } catch (const std::exception &) {}
                 } else {
-                    BOOST_LOG_TRIVIAL(info) << " copy framework:" << it->path().string() << "," << it->path().filename();
                     copy_framework(it->path().string(), dest_path);
                 }
             }
         }
     }
-
 
     if (pro_fn)
         pro_fn(InstallStatusInstallCompleted, 100, cancel);
@@ -1827,15 +1760,7 @@ bool GUI_App::check_networking_version()
         BOOST_LOG_TRIVIAL(info) << "get_network_agent_version=" << network_ver;
     }
 
-    std::string studio_ver;
-    if (NetworkAgent::use_legacy_network) {
-        studio_ver = BAMBU_NETWORK_AGENT_VERSION_LEGACY;
-    } else if (app_config) {
-        std::string user_version = app_config->get_network_plugin_version();
-        studio_ver = user_version.empty() ? get_latest_network_version() : user_version;
-    } else {
-        studio_ver = get_latest_network_version();
-    }
+    std::string studio_ver = get_latest_network_version();
 
     BOOST_LOG_TRIVIAL(info) << "check_networking_version: network_ver=" << network_ver << ", expected=" << studio_ver;
 
@@ -2390,10 +2315,84 @@ void GUI_App::copy_older_config()
 
 std::string GUI_App::get_bbl_client_version()
 {
+#if defined(__WINDOWS__) || defined(__APPLE__)
+    if (Slic3r::PJarczakLinuxBridge::enabled())
+        return std::string(Slic3r::PJarczakLinuxBridge::forced_client_version());
+#elif defined(__LINUX__)
+    return std::string(Slic3r::PJarczakLinuxBridge::forced_client_version());
+#endif
     if (BBLNetworkPlugin::instance().get_get_my_token() == nullptr) {
         return "01.10.01.50";
     }
     return VersionInfo::convert_full_version(SLIC3R_VERSION);
+}
+
+std::map<std::string, std::string> GUI_App::get_extra_header()
+{
+    std::map<std::string, std::string> extra_headers;
+    extra_headers.insert(std::make_pair("X-BBL-Client-Type", "slicer"));
+
+    bool use_bambustudio_identity = false;
+#if defined(__WINDOWS__) || defined(__APPLE__)
+    use_bambustudio_identity = Slic3r::PJarczakLinuxBridge::enabled();
+#elif defined(__LINUX__)
+    use_bambustudio_identity = true;
+#endif
+
+    if (use_bambustudio_identity) {
+        extra_headers.insert(std::make_pair("X-BBL-Client-Name", std::string("BambuStudio")));
+        extra_headers.insert(std::make_pair("X-BBL-Client-Version", std::string(Slic3r::PJarczakLinuxBridge::forced_client_version())));
+    } else {
+        extra_headers.insert(std::make_pair("X-BBL-Client-Name", std::string(SLIC3R_APP_NAME)));
+        extra_headers.insert(std::make_pair("X-BBL-Client-Version", VersionInfo::convert_full_version(SLIC3R_VERSION)));
+    }
+#if defined(__WINDOWS__)
+    if (Slic3r::PJarczakLinuxBridge::enabled()) {
+        extra_headers.insert(std::make_pair("X-BBL-OS-Type", Slic3r::PJarczakLinuxBridge::forced_download_os_type()));
+    }
+#ifdef _M_X64
+    else {
+        extra_headers.insert(std::make_pair("X-BBL-OS-Type", "windows"));
+    }
+#else
+    else {
+        extra_headers.insert(std::make_pair("X-BBL-OS-Type", "windows_arm"));
+    }
+#endif
+#elif defined(__APPLE__)
+    if (Slic3r::PJarczakLinuxBridge::enabled()) {
+        extra_headers.insert(std::make_pair("X-BBL-OS-Type", Slic3r::PJarczakLinuxBridge::forced_download_os_type()));
+    } else {
+        extra_headers.insert(std::make_pair("X-BBL-OS-Type", "macos"));
+    }
+#elif defined(__LINUX__)
+    extra_headers.insert(std::make_pair("X-BBL-OS-Type", "linux"));
+#endif
+    int major = 0, minor = 0, micro = 0;
+    wxGetOsVersion(&major, &minor, &micro);
+    std::string os_version = (boost::format("%1%.%2%.%3%") % major % minor % micro).str();
+    extra_headers.insert(std::make_pair("X-BBL-OS-Version", os_version));
+    if (app_config)
+        extra_headers.insert(std::make_pair("X-BBL-Device-ID", app_config->get("slicer_uuid")));
+    extra_headers.insert(std::make_pair("X-BBL-Language", convert_studio_language_to_api(into_u8(current_language_code_safe()))));
+    return extra_headers;
+}
+
+//BBS
+void GUI_App::init_http_extra_header()
+{
+    std::map<std::string, std::string> extra_headers = get_extra_header();
+
+    if (m_agent)
+        m_agent->set_extra_http_header(extra_headers);
+}
+
+void GUI_App::update_http_extra_header()
+{
+    std::map<std::string, std::string> extra_headers = get_extra_header();
+    Slic3r::Http::set_extra_headers(extra_headers);
+    if (m_agent)
+        m_agent->set_extra_http_header(extra_headers);
 }
 
 void GUI_App::on_start_subscribe_again(std::string dev_id)
@@ -2904,10 +2903,17 @@ bool GUI_App::on_init_inner()
 
 
     // Orca: select network plugin version based on configured version string
-    std::string configured_version = app_config->get_network_plugin_version();
-    NetworkAgent::use_legacy_network = (configured_version == BAMBU_NETWORK_AGENT_VERSION_LEGACY);
-    BOOST_LOG_TRIVIAL(info) << "Network plugin mode: "
-        << (NetworkAgent::use_legacy_network ? ("legacy (version: " + std::string(BAMBU_NETWORK_AGENT_VERSION_LEGACY) + ")") : ("modern (version: " + configured_version + ")"));
+    std::string configured_version = get_latest_network_version();
+    if (app_config) {
+        std::string stored_version = app_config->get_network_plugin_version();
+        if (stored_version != configured_version) {
+            BOOST_LOG_TRIVIAL(info) << "Forcing network plugin version to latest: " << configured_version << " (was " << stored_version << ")";
+            app_config->set(SETTING_NETWORK_PLUGIN_VERSION, configured_version);
+            app_config->save();
+        }
+    }
+    NetworkAgent::use_legacy_network = false;
+    BOOST_LOG_TRIVIAL(info) << "Network plugin mode: modern (version: " << configured_version << ")";
     // Force legacy network plugin if debugger attached
     // See https://github.com/bambulab/BambuStudio/issues/6726
     /* if (!NetworkAgent::use_legacy_network) {
@@ -2923,6 +2929,15 @@ bool GUI_App::on_init_inner()
         }
     } */
     copy_network_if_available();
+    if (Slic3r::PJarczakLinuxBridge::enabled()) {
+        const boost::filesystem::path plugin_folder = boost::filesystem::path(data_dir()) / "plugins";
+        const boost::filesystem::path plugin_cache_dir = boost::filesystem::path(data_dir()) / "ota" / "plugins";
+#ifdef WIN32
+        pjarczak_verify_or_install_windows_bridge_runtime(plugin_folder, plugin_cache_dir);
+#elif defined(__APPLE__) || defined(__WXMAC__)
+        pjarczak_verify_or_install_macos_bridge_runtime(plugin_folder, plugin_cache_dir);
+#endif
+    }
     on_init_network();
 
     if (m_agent && m_agent->is_user_login()) {
@@ -3109,16 +3124,394 @@ bool GUI_App::on_init_inner()
     return true;
 }
 
-void GUI_App::copy_network_if_available()
+void pjarczak_set_reason(std::string* reason, std::string value)
 {
-    if (app_config->get("update_network_plugin") != "true")
+    if (reason)
+        *reason = std::move(value);
+}
+
+static const char* pjarczak_legacy_bootstrap_script_name()
+{
+    return "pjarczak-wsl-run-host.sh";
+}
+
+static wxString pjarczak_quote_windows_arg(const wxString& value)
+{
+    wxString escaped = value;
+    escaped.Replace("\"", "\\\"");
+    return wxString::Format("\"%s\"", escaped);
+}
+
+static wxString pjarczak_quote_posix_arg(const wxString& value)
+{
+    wxString out("'");
+    for (wxUniChar ch : value) {
+        if (ch == '\'')
+            out += "'\\''";
+        else
+            out += ch;
+    }
+    out += "'";
+    return out;
+}
+
+static long pjarczak_run_hidden_windows_command(const wxString& command, wxArrayString* stdout_lines, wxArrayString* stderr_lines)
+{
+#ifdef WIN32
+    wxArrayString local_stdout;
+    wxArrayString local_stderr;
+    long exit_code = wxExecute(command, local_stdout, local_stderr, wxEXEC_SYNC | wxEXEC_HIDE_CONSOLE);
+    if (stdout_lines)
+        *stdout_lines = local_stdout;
+    if (stderr_lines)
+        *stderr_lines = local_stderr;
+    return exit_code;
+#else
+    (void)command;
+    (void)stdout_lines;
+    (void)stderr_lines;
+    return -1;
+#endif
+}
+
+static long pjarczak_run_hidden_posix_command(const wxString& command, wxArrayString* stdout_lines, wxArrayString* stderr_lines)
+{
+#if defined(__WXMAC__) || defined(__APPLE__) || defined(__WXGTK__)
+    wxArrayString local_stdout;
+    wxArrayString local_stderr;
+    long exit_code = wxExecute(command, local_stdout, local_stderr, wxEXEC_SYNC);
+    if (stdout_lines)
+        *stdout_lines = local_stdout;
+    if (stderr_lines)
+        *stderr_lines = local_stderr;
+    return exit_code;
+#else
+    (void)command;
+    (void)stdout_lines;
+    (void)stderr_lines;
+    return -1;
+#endif
+}
+
+static void pjarczak_log_command_output(const char* tag, long exit_code, const wxArrayString& stdout_lines, const wxArrayString& stderr_lines)
+{
+    BOOST_LOG_TRIVIAL(info) << tag << ": exit_code=" << exit_code;
+    for (const auto& line : stdout_lines)
+        BOOST_LOG_TRIVIAL(info) << tag << " [stdout] " << into_u8(line);
+    for (const auto& line : stderr_lines)
+        BOOST_LOG_TRIVIAL(error) << tag << " [stderr] " << into_u8(line);
+}
+
+static void pjarczak_verify_or_install_windows_bridge_runtime(const boost::filesystem::path& plugin_folder,
+                                                              const boost::filesystem::path& plugin_cache_dir)
+{
+#ifndef WIN32
+    (void)plugin_folder;
+    (void)plugin_cache_dir;
+#else
+    if (!Slic3r::PJarczakLinuxBridge::enabled())
         return;
 
+    const auto verify_script = plugin_folder / Slic3r::PJarczakLinuxBridge::windows_wsl_validate_script_file_name();
+    const auto install_script = plugin_folder / Slic3r::PJarczakLinuxBridge::windows_wsl_import_script_file_name();
+    if (!boost::filesystem::exists(verify_script) || !boost::filesystem::exists(install_script)) {
+        BOOST_LOG_TRIVIAL(warning) << "[pjarczak_runtime_setup] missing verify/install script in " << plugin_folder.string();
+        return;
+    }
+
+    const wxString plugin_dir_wx = from_u8(plugin_folder.string());
+    const wxString cache_dir_wx = from_u8(plugin_cache_dir.string());
+    const wxString verify_cmd = wxString::Format(
+        "powershell -NoProfile -ExecutionPolicy Bypass -File %s -PackageDir %s -PluginCacheDir %s -AllowMissingLinuxPlugin",
+        pjarczak_quote_windows_arg(from_u8(verify_script.string())),
+        pjarczak_quote_windows_arg(plugin_dir_wx),
+        pjarczak_quote_windows_arg(cache_dir_wx));
+
+    wxArrayString verify_out;
+    wxArrayString verify_err;
+    long verify_code = pjarczak_run_hidden_windows_command(verify_cmd, &verify_out, &verify_err);
+    pjarczak_log_command_output("[pjarczak_runtime_verify]", verify_code, verify_out, verify_err);
+    if (verify_code == 0)
+        return;
+
+    const wxString install_cmd = wxString::Format(
+        "powershell -NoProfile -ExecutionPolicy Bypass -File %s -PackageDir %s -PluginDir %s -PluginCacheDir %s",
+        pjarczak_quote_windows_arg(from_u8(install_script.string())),
+        pjarczak_quote_windows_arg(plugin_dir_wx),
+        pjarczak_quote_windows_arg(plugin_dir_wx),
+        pjarczak_quote_windows_arg(cache_dir_wx));
+
+    wxArrayString install_out;
+    wxArrayString install_err;
+    long install_code = pjarczak_run_hidden_windows_command(install_cmd, &install_out, &install_err);
+    pjarczak_log_command_output("[pjarczak_runtime_install]", install_code, install_out, install_err);
+
+    verify_out.clear();
+    verify_err.clear();
+    verify_code = pjarczak_run_hidden_windows_command(verify_cmd, &verify_out, &verify_err);
+    pjarczak_log_command_output("[pjarczak_runtime_verify_after_install]", verify_code, verify_out, verify_err);
+#endif
+}
+
+static void pjarczak_verify_or_install_macos_bridge_runtime(const boost::filesystem::path& plugin_folder,
+                                                            const boost::filesystem::path& plugin_cache_dir)
+{
+#if !(defined(__WXMAC__) || defined(__APPLE__))
+    (void)plugin_folder;
+    (void)plugin_cache_dir;
+#else
+    if (!Slic3r::PJarczakLinuxBridge::enabled())
+        return;
+
+    const auto verify_script = plugin_folder / Slic3r::PJarczakLinuxBridge::mac_runtime_verify_script_file_name();
+    const auto install_script = plugin_folder / Slic3r::PJarczakLinuxBridge::mac_runtime_install_script_file_name();
+    if (!boost::filesystem::exists(verify_script) || !boost::filesystem::exists(install_script)) {
+        BOOST_LOG_TRIVIAL(warning) << "[pjarczak_runtime_setup] missing macOS verify/install script in " << plugin_folder.string();
+        return;
+    }
+
+    const wxString plugin_dir_wx = from_u8(plugin_folder.string());
+    const wxString cache_dir_wx = from_u8(plugin_cache_dir.string());
+    const wxString verify_cmd = wxString::Format(
+        "/bin/bash %s -PackageDir %s -PluginDir %s -PluginCacheDir %s -AllowMissingLinuxPlugin",
+        pjarczak_quote_posix_arg(from_u8(verify_script.string())),
+        pjarczak_quote_posix_arg(plugin_dir_wx),
+        pjarczak_quote_posix_arg(plugin_dir_wx),
+        pjarczak_quote_posix_arg(cache_dir_wx));
+
+    wxArrayString verify_out;
+    wxArrayString verify_err;
+    long verify_code = pjarczak_run_hidden_posix_command(verify_cmd, &verify_out, &verify_err);
+    pjarczak_log_command_output("[pjarczak_runtime_verify_macos]", verify_code, verify_out, verify_err);
+    if (verify_code == 0)
+        return;
+
+    wxMessageDialog prompt(
+        nullptr,
+        _L("The macOS Linux bridge runtime is not ready. OrcaSlicer can install or repair the bundled Lima runtime now."),
+        _L("OrcaSlicer Linux Bridge"),
+        wxYES_NO | wxICON_QUESTION | wxCENTRE);
+    if (prompt.ShowModal() != wxID_YES)
+        return;
+
+    const wxString install_cmd = wxString::Format(
+        "/bin/bash %s -PackageDir %s -PluginDir %s -PluginCacheDir %s -ReplaceExisting",
+        pjarczak_quote_posix_arg(from_u8(install_script.string())),
+        pjarczak_quote_posix_arg(plugin_dir_wx),
+        pjarczak_quote_posix_arg(plugin_dir_wx),
+        pjarczak_quote_posix_arg(cache_dir_wx));
+
+    wxArrayString install_out;
+    wxArrayString install_err;
+    long install_code = pjarczak_run_hidden_posix_command(install_cmd, &install_out, &install_err);
+    pjarczak_log_command_output("[pjarczak_runtime_install_macos]", install_code, install_out, install_err);
+
+    verify_out.clear();
+    verify_err.clear();
+    verify_code = pjarczak_run_hidden_posix_command(verify_cmd, &verify_out, &verify_err);
+    pjarczak_log_command_output("[pjarczak_runtime_verify_after_install_macos]", verify_code, verify_out, verify_err);
+#endif
+}
+
+bool pjarczak_bridge_payload_ready(const boost::filesystem::path& plugin_folder, std::string* reason)
+{
+    if (!Slic3r::PJarczakLinuxBridge::enabled()) {
+        pjarczak_set_reason(reason, "bridge disabled");
+        return true;
+    }
+
+    const auto has_file = [&plugin_folder](const std::string& file_name) {
+        const auto candidate = plugin_folder / file_name;
+        return boost::filesystem::exists(candidate) && !boost::filesystem::is_directory(candidate);
+    };
+
+#if defined(__WXMAC__) || defined(__APPLE__)
+    const std::string required_files[] = {
+        Slic3r::PJarczakLinuxBridge::bridge_network_current_dir_name(),
+        Slic3r::PJarczakLinuxBridge::host_executable_file_name(),
+        std::string("pjarczak_bambu_linux_host_abi1"),
+        std::string("pjarczak_bambu_linux_host_abi0"),
+        Slic3r::PJarczakLinuxBridge::mac_host_wrapper_file_name(),
+        Slic3r::PJarczakLinuxBridge::mac_runtime_install_script_file_name(),
+        Slic3r::PJarczakLinuxBridge::mac_runtime_verify_script_file_name(),
+        Slic3r::PJarczakLinuxBridge::mac_lima_instance_file_name(),
+        Slic3r::PJarczakLinuxBridge::linux_network_library_name(),
+        Slic3r::PJarczakLinuxBridge::linux_source_library_name(),
+        std::string("ca-certificates.crt"),
+        std::string("slicer_base64.cer")
+    };
+#else
+    const std::string required_files[] = {
+        Slic3r::PJarczakLinuxBridge::bridge_network_current_dir_name(),
+        Slic3r::PJarczakLinuxBridge::host_executable_file_name(),
+        std::string("pjarczak_bambu_linux_host_abi1"),
+        std::string("pjarczak_bambu_linux_host_abi0"),
+        Slic3r::PJarczakLinuxBridge::windows_wsl_distro_file_name(),
+        Slic3r::PJarczakLinuxBridge::windows_wsl_validate_script_file_name(),
+        Slic3r::PJarczakLinuxBridge::windows_wsl_rootfs_file_name(),
+        Slic3r::PJarczakLinuxBridge::windows_plugin_cache_subdir_file_name(),
+        Slic3r::PJarczakLinuxBridge::linux_network_library_name(),
+        Slic3r::PJarczakLinuxBridge::linux_source_library_name(),
+        std::string("ca-certificates.crt"),
+        std::string("slicer_base64.cer")
+    };
+#endif
+
+    for (const std::string& file_name : required_files) {
+        if (!has_file(file_name)) {
+            pjarczak_set_reason(reason, "missing required runtime file: " + file_name);
+            return false;
+        }
+    }
+#if !(defined(__WXMAC__) || defined(__APPLE__))
+    if (!has_file(Slic3r::PJarczakLinuxBridge::windows_wsl_import_script_file_name()) &&
+        !has_file("pjarczak-install-wsl-runtime.ps1")) {
+        pjarczak_set_reason(reason, "missing required runtime file: " + Slic3r::PJarczakLinuxBridge::windows_wsl_import_script_file_name());
+        return false;
+    }
+
+    if (!has_file(Slic3r::PJarczakLinuxBridge::windows_wsl_bootstrap_script_file_name()) &&
+        !has_file(pjarczak_legacy_bootstrap_script_name())) {
+        pjarczak_set_reason(reason, "missing required runtime file: " + Slic3r::PJarczakLinuxBridge::windows_wsl_bootstrap_script_file_name());
+        return false;
+    }
+#endif
+
+    for (const std::string& file_name : {
+            Slic3r::PJarczakLinuxBridge::linux_network_library_name(),
+            Slic3r::PJarczakLinuxBridge::linux_source_library_name()}) {
+        std::string validate_reason;
+        if (!Slic3r::PJarczakLinuxBridge::validate_linux_so_binary((plugin_folder / file_name).string(), &validate_reason)) {
+            pjarczak_set_reason(reason, file_name + ": " + validate_reason);
+            return false;
+        }
+    }
+
+    const auto manifest_path = plugin_folder / Slic3r::PJarczakLinuxBridge::linux_payload_manifest_file_name();
+    if (boost::filesystem::exists(manifest_path) && !boost::filesystem::is_directory(manifest_path)) {
+        std::string manifest_reason;
+        if (!Slic3r::PJarczakLinuxBridge::validate_linux_payload_set_against_manifest(plugin_folder, &manifest_reason)) {
+            pjarczak_set_reason(reason, "linux payload manifest validation failed: " + manifest_reason);
+            return false;
+        }
+    }
+
+    for (const std::string& file_name : {std::string("liblive555.so"), std::string("libagora_rtc_sdk.so"), std::string("libagora-fdkaac.so")}) {
+        if (!has_file(file_name))
+            continue;
+        std::string validate_reason;
+        if (!Slic3r::PJarczakLinuxBridge::validate_linux_so_binary((plugin_folder / file_name).string(), &validate_reason)) {
+            pjarczak_set_reason(reason, file_name + ": " + validate_reason);
+            return false;
+        }
+    }
+
+    pjarczak_set_reason(reason, "ok");
+    return true;
+}
+
+void pjarczak_copy_runtime_file_if_exists(const boost::filesystem::path& src_dir,
+                                          const boost::filesystem::path& dst_dir,
+                                          const std::string& file_name)
+{
+    if (file_name.empty())
+        return;
+
+    const auto src = src_dir / file_name;
+    const auto dst = dst_dir / file_name;
+
+    if (!boost::filesystem::exists(src) || boost::filesystem::is_directory(src))
+        return;
+
+    boost::filesystem::create_directories(dst.parent_path());
+
+    std::string error_message;
+    CopyFileResult cfr = copy_file(src.string(), dst.string(), error_message, false);
+    if (cfr != CopyFileResult::SUCCESS) {
+        BOOST_LOG_TRIVIAL(error) << "[copy_network_if_available] copy runtime file failed: "
+                                 << src.string() << " -> "
+                                 << dst.string() << ", code=" << cfr
+                                 << ", err=" << error_message;
+        return;
+    }
+
+#ifndef WIN32
+    static constexpr const auto perms =
+        fs::owner_read | fs::owner_write | fs::group_read | fs::others_read |
+        fs::owner_exe | fs::group_exe | fs::others_exe;
+    try {
+        fs::permissions(dst, perms);
+    } catch (...) {}
+#endif
+}
+
+void pjarczak_copy_local_overlay_runtime(const boost::filesystem::path& plugin_folder)
+{
+    if (!Slic3r::PJarczakLinuxBridge::enabled())
+        return;
+
+    const boost::filesystem::path exe_path(into_u8(wxStandardPaths::Get().GetExecutablePath()));
+    const boost::filesystem::path exe_dir = exe_path.parent_path();
+
+    const std::string helper_files[] = {
+        Slic3r::PJarczakLinuxBridge::windows_wsl_distro_file_name(),
+        Slic3r::PJarczakLinuxBridge::windows_wsl_import_script_file_name(),
+        Slic3r::PJarczakLinuxBridge::windows_wsl_validate_script_file_name(),
+        Slic3r::PJarczakLinuxBridge::windows_wsl_bootstrap_script_file_name(),
+        pjarczak_legacy_bootstrap_script_name(),
+        Slic3r::PJarczakLinuxBridge::windows_wsl_rootfs_file_name(),
+        Slic3r::PJarczakLinuxBridge::windows_plugin_cache_subdir_file_name(),
+        "install_runtime.cmd",
+        "assemble_windows_runtime_bundle.ps1"
+    };
+
+    const boost::filesystem::path candidate_dirs[] = {
+        exe_dir,
+        exe_dir / "plugins"
+    };
+
+    for (const auto& candidate_dir : candidate_dirs) {
+        if (!boost::filesystem::exists(candidate_dir) || !boost::filesystem::is_directory(candidate_dir))
+            continue;
+
+        for (const std::string& file_name : helper_files)
+            pjarczak_copy_runtime_file_if_exists(candidate_dir, plugin_folder, file_name);
+
+        try {
+            for (auto& dir_entry : boost::filesystem::directory_iterator(candidate_dir)) {
+                if (!boost::filesystem::is_regular_file(dir_entry.path()))
+                    continue;
+                const std::string file_name = dir_entry.path().filename().string();
+                if (!Slic3r::PJarczakLinuxBridge::is_overlay_runtime_filename(file_name))
+                    continue;
+                pjarczak_copy_runtime_file_if_exists(candidate_dir, plugin_folder, file_name);
+            }
+        } catch (...) {}
+    }
+
+    const auto runtime_dst_dir = plugin_folder / "pjarczak_bambu_linux_host.runtime";
+    if (boost::filesystem::exists(runtime_dst_dir) && boost::filesystem::is_directory(runtime_dst_dir)) {
+        try {
+            boost::filesystem::remove_all(runtime_dst_dir);
+        } catch (...) {}
+    }
+}
+
+void GUI_App::copy_network_if_available()
+{
     std::string data_dir_str = data_dir();
     boost::filesystem::path data_dir_path(data_dir_str);
     auto plugin_folder = data_dir_path / "plugins";
     auto cache_folder = data_dir_path / "ota";
     std::string changelog_file = cache_folder.string() + "/network_plugins.json";
+
+    if (!boost::filesystem::exists(plugin_folder))
+        boost::filesystem::create_directory(plugin_folder);
+
+    pjarczak_copy_local_overlay_runtime(plugin_folder);
+
+    if (app_config->get("update_network_plugin") != "true")
+        return;
 
     std::string cached_version;
     if (boost::filesystem::exists(changelog_file)) {
@@ -3128,14 +3521,98 @@ void GUI_App::copy_network_if_available()
             ifs >> j;
             if (j.contains("version"))
                 cached_version = j["version"];
-            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": cached_version = " << cached_version;
-        } catch (nlohmann::detail::parse_error& err) {
-            BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": parse " << changelog_file << " failed: " << err.what();
+        } catch (nlohmann::detail::parse_error&) {}
+    }
+
+    const bool pj_force_linux_payload = Slic3r::PJarczakLinuxBridge::enabled();
+    std::string error_message;
+
+    auto copy_one = [&](const boost::filesystem::path& src, const boost::filesystem::path& dst) -> bool {
+        CopyFileResult cfr = copy_file(src.string(), dst.string(), error_message, false);
+        if (cfr != CopyFileResult::SUCCESS) {
+            BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": Copying failed(" << cfr << "): " << error_message;
+            return false;
         }
+        static constexpr const auto perms = fs::owner_read | fs::owner_write | fs::group_read | fs::others_read |
+                                            fs::owner_exe | fs::group_exe | fs::others_exe;
+        try { fs::permissions(dst, perms); } catch (...) {}
+        return true;
+    };
+
+    if (pj_force_linux_payload) {
+        if (!boost::filesystem::exists(cache_folder)) {
+            try {
+                boost::filesystem::create_directories(cache_folder);
+            } catch (...) {
+                BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": failed to create linux payload cache folder: " << cache_folder.string();
+                return;
+            }
+        }
+
+        bool copy_failed = false;
+        try {
+            for (auto& dir_entry : boost::filesystem::directory_iterator(cache_folder)) {
+                const auto& path = dir_entry.path();
+                const std::string file_name = path.filename().string();
+                const std::string file_path = path.string();
+
+                if (!Slic3r::PJarczakLinuxBridge::is_overlay_runtime_filename(file_name))
+                    continue;
+
+                if (Slic3r::PJarczakLinuxBridge::is_linux_payload_filename(file_name)) {
+                    std::string validate_reason;
+                    if (!Slic3r::PJarczakLinuxBridge::validate_linux_payload_file(file_path, &validate_reason)) {
+                        BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": invalid cached linux payload file " << file_name << ", reason=" << validate_reason;
+                        copy_failed = true;
+                        break;
+                    }
+                } else if (path.extension() == ".so" || file_name.find(".so.") != std::string::npos) {
+                    std::string validate_reason;
+                    if (!Slic3r::PJarczakLinuxBridge::validate_linux_so_binary(file_path, &validate_reason)) {
+                        BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": invalid cached linux runtime file " << file_name << ", reason=" << validate_reason;
+                        copy_failed = true;
+                        break;
+                    }
+                }
+
+                if (!copy_one(path, plugin_folder / file_name)) {
+                    copy_failed = true;
+                    break;
+                }
+
+                try {
+                    fs::remove(path);
+                } catch (...) {}
+            }
+
+            pjarczak_copy_local_overlay_runtime(plugin_folder);
+        } catch (...) {
+            copy_failed = true;
+        }
+
+        if (copy_failed)
+            return;
+
+        const auto manifest = plugin_folder / Slic3r::PJarczakLinuxBridge::linux_payload_manifest_file_name();
+        if (boost::filesystem::exists(manifest)) {
+            std::string validate_reason;
+            if (!Slic3r::PJarczakLinuxBridge::validate_linux_payload_set_against_manifest(plugin_folder, &validate_reason)) {
+                BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": manifest validation failed after copy: " << validate_reason;
+                return;
+            }
+        }
+
+        if (!cached_version.empty()) {
+            app_config->set(SETTING_NETWORK_PLUGIN_VERSION, cached_version);
+            app_config->save();
+        }
+        if (boost::filesystem::exists(changelog_file))
+            fs::remove(changelog_file);
+        app_config->set("update_network_plugin", "false");
+        return;
     }
 
     if (cached_version.empty()) {
-        BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": no version found in changelog, aborting copy";
         app_config->set("update_network_plugin", "false");
         return;
     }
@@ -3164,53 +3641,26 @@ void GUI_App::copy_network_if_available()
     live555_library_dst = plugin_folder.string() + "/liblive555.so";
 #endif
 
-    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": checking network_library " << network_library << ", player_library " << player_library;
-    if (!boost::filesystem::exists(plugin_folder)) {
-        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": create directory " << plugin_folder.string();
-        boost::filesystem::create_directory(plugin_folder);
-    }
-    std::string error_message;
     if (boost::filesystem::exists(network_library)) {
-        CopyFileResult cfr = copy_file(network_library, network_library_dst, error_message, false);
-        if (cfr != CopyFileResult::SUCCESS) {
-            BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": Copying failed(" << cfr << "): " << error_message;
+        if (!copy_one(network_library, network_library_dst))
             return;
-        }
-
-        static constexpr const auto perms = fs::owner_read | fs::owner_write | fs::group_read | fs::others_read;
-        fs::permissions(network_library_dst, perms);
         fs::remove(network_library);
-        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": Copying network library from " << network_library << " to " << network_library_dst << " successfully.";
-
         app_config->set(SETTING_NETWORK_PLUGIN_VERSION, cached_version);
         app_config->save();
     }
 
     if (boost::filesystem::exists(player_library)) {
-        CopyFileResult cfr = copy_file(player_library, player_library_dst, error_message, false);
-        if (cfr != CopyFileResult::SUCCESS) {
-            BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": Copying failed(" << cfr << "): " << error_message;
+        if (!copy_one(player_library, player_library_dst))
             return;
-        }
-
-        static constexpr const auto perms = fs::owner_read | fs::owner_write | fs::group_read | fs::others_read;
-        fs::permissions(player_library_dst, perms);
         fs::remove(player_library);
-        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": Copying player library from " << player_library << " to " << player_library_dst << " successfully.";
     }
 
     if (boost::filesystem::exists(live555_library)) {
-        CopyFileResult cfr = copy_file(live555_library, live555_library_dst, error_message, false);
-        if (cfr != CopyFileResult::SUCCESS) {
-            BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": Copying failed(" << cfr << "): " << error_message;
+        if (!copy_one(live555_library, live555_library_dst))
             return;
-        }
-
-        static constexpr const auto perms = fs::owner_read | fs::owner_write | fs::group_read | fs::others_read;
-        fs::permissions(live555_library_dst, perms);
         fs::remove(live555_library);
-        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": Copying live555 library from " << live555_library << " to " << live555_library_dst << " successfully.";
     }
+
     if (boost::filesystem::exists(changelog_file))
         fs::remove(changelog_file);
     app_config->set("update_network_plugin", "false");
@@ -3219,13 +3669,51 @@ void GUI_App::copy_network_if_available()
 bool GUI_App::on_init_network(bool try_backup)
 {
     auto should_load_networking_plugin = app_config->get_bool("installed_networking");
+    const bool bridge_mode = Slic3r::PJarczakLinuxBridge::enabled();
+    const boost::filesystem::path bridge_plugin_folder = boost::filesystem::path(data_dir()) / "plugins";
+    std::string bridge_payload_reason;
+    const bool bridge_payload_ready = !bridge_mode || pjarczak_bridge_payload_ready(bridge_plugin_folder, &bridge_payload_reason);
+    bool create_network_agent = false;
 
-    std::string config_version = app_config->get_network_plugin_version();
+    const auto mark_networking_need_update = [this]() {
+        m_networking_need_update = true;
+    };
+
+    std::string config_version = get_latest_network_version();
+#if defined(__LINUX__)
+    {
+        const auto native_ca_bundle = boost::filesystem::path(resources_dir()) / "cert" / "ca-certificates.crt";
+        if (boost::filesystem::exists(native_ca_bundle)) {
+            ::setenv("SSL_CERT_FILE", native_ca_bundle.string().c_str(), 1);
+            ::setenv("CURL_CA_BUNDLE", native_ca_bundle.string().c_str(), 1);
+            ::setenv("SSL_CERT_DIR", "/etc/ssl/certs", 1);
+            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": configured native Linux CA bundle: " << native_ca_bundle.string();
+        } else {
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": native Linux CA bundle not found: " << native_ca_bundle.string();
+        }
+    }
+#endif
+    if (app_config && app_config->get_network_plugin_version() != config_version) {
+        app_config->set(SETTING_NETWORK_PLUGIN_VERSION, config_version);
+        app_config->save();
+    }
 
     if (should_load_networking_plugin) {
         if (config_version.empty()) {
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": no version configured, need to download";
-            m_networking_need_update = true;
+            mark_networking_need_update();
+
+            if (!m_device_manager)
+                m_device_manager = new Slic3r::DeviceManager();
+            if (!m_user_manager)
+                m_user_manager = new Slic3r::UserManager();
+
+            return false;
+        }
+
+        if (bridge_mode && !bridge_payload_ready) {
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": skipping bridge DLL load because payload/runtime is not ready, reason=" << bridge_payload_reason;
+            mark_networking_need_update();
 
             if (!m_device_manager)
                 m_device_manager = new Slic3r::DeviceManager();
@@ -3252,14 +3740,21 @@ bool GUI_App::on_init_network(bool try_backup)
                 }
             }
 
-            if (check_networking_version()) {
+            if (bridge_mode && !bridge_payload_ready) {
+                BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": bridge payload/runtime not ready, reason=" << bridge_payload_reason;
+                mark_networking_need_update();
+            } else if (check_networking_version()) {
                 BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": on_init_network, compatibility version";
-                auto bambu_source = Slic3r::NetworkAgent::get_bambu_source_entry();
-                if (!bambu_source) {
-                    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": can not get bambu source module!";
-                    m_networking_compatible = false;
-                    if (should_load_networking_plugin) {
-                        m_networking_need_update = true;
+                if (bridge_mode) {
+                    create_network_agent = true;
+                } else {
+                    auto bambu_source = Slic3r::NetworkAgent::get_bambu_source_entry();
+                    if (!bambu_source) {
+                        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": can not get bambu source module!";
+                        m_networking_compatible = false;
+                        mark_networking_need_update();
+                    } else {
+                        create_network_agent = true;
                     }
                 }
             } else {
@@ -3271,98 +3766,107 @@ bool GUI_App::on_init_network(bool try_backup)
                     goto __retry;
                 }
                 BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": on_init_network, version dismatch, need upload network module";
-                if (should_load_networking_plugin) {
-                    m_networking_need_update = true;
-                }
+                mark_networking_need_update();
             }
         } else {
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": on_init_network, load dll failed";
-            if (should_load_networking_plugin) {
-                BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": on_init_network, need upload network module";
-                m_networking_need_update = true;
+            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": on_init_network, need upload network module";
+            mark_networking_need_update();
+        }
+    }
+
+    if (create_network_agent) {
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(", create network agent...");
+        std::string data_directory = data_dir();
+
+        Slic3r::NetworkAgentFactory::register_all_agents();
+
+        std::unique_ptr<Slic3r::NetworkAgent> agent_ptr = Slic3r::create_agent_from_config(data_directory, app_config);
+        m_agent = agent_ptr.release();
+        if (!m_agent || !m_agent->get_network_agent()) {
+            BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": create network agent returned null handle";
+            delete m_agent;
+            m_agent = nullptr;
+            m_networking_compatible = false;
+            mark_networking_need_update();
+            create_network_agent = false;
+        }
+
+        if (!create_network_agent) {
+            int result = Slic3r::NetworkAgent::unload_network_module();
+            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": unload_network_module after create_agent failure, result = " << result;
+        } else {
+            if (!m_device_manager)
+                m_device_manager = new Slic3r::DeviceManager(m_agent);
+            else
+                m_device_manager->set_agent(m_agent);
+
+            if (!m_user_manager)
+                m_user_manager = new Slic3r::UserManager(m_agent);
+            else
+                m_user_manager->set_agent(m_agent);
+
+            if (this->is_enable_multi_machine()) {
+                if (!m_task_manager) {
+                    m_task_manager = new Slic3r::TaskManager(m_agent);
+                    m_task_manager->start();
+                }
+
+                m_device_manager->EnableMultiMachine(true);
+            } else {
+                m_device_manager->EnableMultiMachine(false);
+            }
+
+            if (m_agent)
+                m_agent->set_config_dir(data_directory);
+
+            if (m_agent)
+                m_agent->init_log();
+
+            if (m_agent)
+                m_agent->set_cert_file(resources_dir() + "/cert", "slicer_base64.cer");
+
+            init_http_extra_header();
+
+            if (m_agent) {
+                init_networking_callbacks();
+                std::string country_code = app_config->get_country_code();
+                m_agent->set_country_code(country_code);
+                m_agent->start();
+            }
+
+            // When using Orca cloud alongside the BBL network plugin, the BBL DLL agent still
+            // needs to be created and configured so BBLPrinterAgent can use it for LAN discovery.
+            if (should_load_networking_plugin && !m_networking_need_update) {
+                auto& plugin = BBLNetworkPlugin::instance();
+                if (plugin.is_loaded() && !plugin.has_agent())
+                    plugin.create_agent(data_directory);
+                if (plugin.has_agent()) {
+                    BBLCloudServiceAgent bbl;
+                    bbl.set_config_dir(data_directory);
+                    bbl.init_log();
+                    bbl.set_cert_file(resources_dir() + "/cert", "slicer_base64.cer");
+                    bbl.set_country_code(app_config->get_country_code());
+                    bbl.start();
+                }
             }
         }
-    }
-
-    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(", create network agent...");
-    //std::string data_dir = wxStandardPaths::Get().GetUserDataDir().ToUTF8().data();
-    std::string data_directory = data_dir();
-
-    // Register all printer agents before creating the network agent
-    Slic3r::NetworkAgentFactory::register_all_agents();
-
-    // m_agent = new Slic3r::NetworkAgent(data_directory);
-    std::unique_ptr<Slic3r::NetworkAgent> agent_ptr = Slic3r::create_agent_from_config(data_directory, app_config);
-    m_agent = agent_ptr.release();
-
-    if (!m_device_manager)
-        m_device_manager = new Slic3r::DeviceManager(m_agent);
-    else
-        m_device_manager->set_agent(m_agent);
-
-    if (!m_user_manager)
-        m_user_manager = new Slic3r::UserManager(m_agent);
-    else
-        m_user_manager->set_agent(m_agent);
-
-    if (this->is_enable_multi_machine()) {
-        if (!m_task_manager) {
-            m_task_manager = new Slic3r::TaskManager(m_agent);
-            m_task_manager->start();
-        }
-
-        m_device_manager->EnableMultiMachine(true);
     } else {
-        m_device_manager->EnableMultiMachine(false);
-    }
+        if (m_device_manager)
+            m_device_manager->EnableMultiMachine(false);
 
-    //BBS set config dir
-    if (m_agent) {
-        m_agent->set_config_dir(data_directory);
-    }
-    //BBS start http log
-    if (m_agent) {
-        m_agent->init_log();
-    }
-
-    //BBS set cert dir
-    if (m_agent)
-        m_agent->set_cert_file(resources_dir() + "/cert", "slicer_base64.cer");
-
-    if (m_agent) {
-        init_networking_callbacks();
-        std::string country_code = app_config->get_country_code();
-        m_agent->set_country_code(country_code);
-        m_agent->start();
-    }
-
-    // When using Orca cloud alongside the BBL network plugin, the BBL DLL agent still
-    // needs to be created and configured (config dir, certs, country, start) so that
-    // BBLPrinterAgent can use it for LAN discovery and printer communication.
-    if (should_load_networking_plugin && !m_networking_need_update) {
-        auto& plugin = BBLNetworkPlugin::instance();
-        if (plugin.is_loaded() && !plugin.has_agent()) {
-            plugin.create_agent(data_directory);
-        }
-        if (plugin.has_agent()) {
-            BBLCloudServiceAgent bbl;
-            bbl.set_config_dir(data_directory);
-            bbl.init_log();
-            bbl.set_cert_file(resources_dir() + "/cert", "slicer_base64.cer");
-            bbl.set_country_code(app_config->get_country_code());
-            bbl.start();
-        }
-    }
-
-    if (!should_load_networking_plugin) {
         int result = Slic3r::NetworkAgent::unload_network_module();
-        BOOST_LOG_TRIVIAL(info) << "on_init_network, unload_network_module, result = " << result;
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": on_init_network fallback, unload_network_module, result = " << result;
 
         if (!m_device_manager)
             m_device_manager = new Slic3r::DeviceManager();
+        else
+            m_device_manager->set_agent(nullptr);
 
         if (!m_user_manager)
             m_user_manager = new Slic3r::UserManager();
+        else
+            m_user_manager->set_agent(nullptr);
     }
 
     if (should_load_networking_plugin && m_networking_compatible && !NetworkAgent::use_legacy_network) {
@@ -4116,7 +4620,7 @@ void GUI_App::ShowUserLogin(bool show, const std::string& provider)
             delete login_dlg;
             auto cloud_agent = m_agent->get_cloud_agent(provider);
             login_dlg        = new ZUserLogin(cloud_agent);
-            login_dlg->ShowModal();
+            login_dlg->run();
         } catch (std::exception &) {
             ;
         }
@@ -4712,6 +5216,17 @@ void GUI_App::handle_script_message(std::string msg, const std::string& provider
                         request_user_login(1, provider);
                     }
                 }
+            }
+            if (cmd == "user_ticket_login") {
+                std::string ticket = j["data"]["ticket"];
+                TicketLoginTask::perform_async(ticket, [this](std::string login_info) {
+                    if (m_agent && !login_info.empty()) {
+                        m_agent->change_user(login_info);
+                        if (m_agent->is_user_login()) {
+                            request_user_login(1);
+                        }
+                    }
+                });
             }
         }
     }
@@ -6070,9 +6585,11 @@ void GUI_App::sync_preset(Preset* preset)
             if (!new_setting_id.empty()) {
                 setting_id = new_setting_id;
                 result = 0;
-                auto update_time_str = values_map[ORCA_JSON_KEY_UPDATE_TIME];
-                if (!update_time_str.empty())
-                    update_time = std::atoll(update_time_str.c_str());
+                auto it = values_map.find(IOT_JSON_KEY_UPDATE_TIME);
+                if (it == values_map.end() || it->second.empty())
+                    it = values_map.find(ORCA_JSON_KEY_UPDATE_TIME);
+                if (it != values_map.end() && !it->second.empty())
+                    update_time = std::atoll(it->second.c_str());
             }
             else {
                 BOOST_LOG_TRIVIAL(trace) << "[sync_preset]init: request_setting_id failed, http code "<<http_code;
@@ -6099,9 +6616,11 @@ void GUI_App::sync_preset(Preset* preset)
             if (!new_setting_id.empty()) {
                 setting_id = new_setting_id;
                 result = 0;
-                auto update_time_str = values_map[ORCA_JSON_KEY_UPDATE_TIME];
-                if (!update_time_str.empty())
-                    update_time = std::atoll(update_time_str.c_str());
+                auto it = values_map.find(IOT_JSON_KEY_UPDATE_TIME);
+                if (it == values_map.end() || it->second.empty())
+                    it = values_map.find(ORCA_JSON_KEY_UPDATE_TIME);
+                if (it != values_map.end() && !it->second.empty())
+                    update_time = std::atoll(it->second.c_str());
             } else {
                 BOOST_LOG_TRIVIAL(trace) << "[sync_preset]create: request_setting_id failed, http code "<<http_code;
                 // do not post new preset this time if http code >= 400
@@ -6129,9 +6648,11 @@ void GUI_App::sync_preset(Preset* preset)
                         updated_info = "hold";
                         BOOST_LOG_TRIVIAL(error) << "[sync_preset] put setting_id = " << setting_id << " failed, http_code = " << http_code;
                     } else {
-                            auto update_time_str = values_map[ORCA_JSON_KEY_UPDATE_TIME];
-                            if (!update_time_str.empty())
-                                update_time = std::atoll(update_time_str.c_str());
+                        auto it = values_map.find(IOT_JSON_KEY_UPDATE_TIME);
+                        if (it == values_map.end() || it->second.empty())
+                            it = values_map.find(ORCA_JSON_KEY_UPDATE_TIME);
+                        if (it != values_map.end() && !it->second.empty())
+                            update_time = std::atoll(it->second.c_str());
                     }
                 }
 
@@ -6546,6 +7067,8 @@ void GUI_App::start_sync_user_preset(bool with_progress_dlg)
             process_delete_presets();
 
             // get setting list, update setting list
+            if (!m_agent)
+                return;
             std::string version = preset_bundle->get_vendor_profile_version(PresetBundle::ORCA_DEFAULT_BUNDLE).to_string();
 
             // run check_and_fix_user_presets_syncinfo once before syncing to make sure all presets have correct sync_info
@@ -6556,7 +7079,9 @@ void GUI_App::start_sync_user_preset(bool with_progress_dlg)
                 auto type = info[BBL_JSON_KEY_TYPE];
                 auto name = info[BBL_JSON_KEY_NAME];
                 auto setting_id = info[BBL_JSON_KEY_SETTING_ID];
-                auto update_time_str = info[ORCA_JSON_KEY_UPDATE_TIME];
+                auto update_time_str = info[IOT_JSON_KEY_UPDATE_TIME];
+                if (update_time_str.empty())
+                    update_time_str = info[ORCA_JSON_KEY_UPDATE_TIME];
                 long long update_time = 0;
                 if (!update_time_str.empty())
                     update_time = std::atoll(update_time_str.c_str());

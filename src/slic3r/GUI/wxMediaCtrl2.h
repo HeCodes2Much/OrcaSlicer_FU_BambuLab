@@ -13,6 +13,8 @@
 
 wxDECLARE_EVENT(EVT_MEDIA_CTRL_STAT, wxCommandEvent);
 
+void wxMediaCtrl_OnSize(wxWindow * ctrl, wxSize const & videoSize, int width, int height);
+
 #if defined(__LINUX__) && defined(__WXGTK__)
 typedef struct _GstElement GstElement;
 #endif

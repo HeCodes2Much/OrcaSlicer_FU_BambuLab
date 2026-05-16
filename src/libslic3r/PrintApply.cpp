@@ -1165,16 +1165,6 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
         m_ori_full_print_config = new_full_config;
         new_full_config.update_values_to_printer_extruders_for_multiple_filaments(new_full_config, filament_options_with_variant,  "filament_self_index", "filament_extruder_variant");
     }
-    // else {
-    //     int extruder_count;
-    //     bool different_extruder = new_full_config.support_different_extruders(extruder_count);
-    //     print_variant_index.resize(extruder_count);
-    //     for (int e_index = 0; e_index < extruder_count; e_index++)
-    //     {
-    //         print_variant_index[e_index] = e_index;
-    //     }
-    // }
-
     auto opt_filament_map = new_full_config.option<ConfigOptionInts>("filament_map");
     std::vector<int> filament_maps = opt_filament_map ? opt_filament_map->values : std::vector<int>();
 

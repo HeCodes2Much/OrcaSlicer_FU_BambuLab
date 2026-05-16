@@ -1051,18 +1051,30 @@ int GuideFrame::GetFilamentInfo( std::string VendorDirectory, json & pFilaList, 
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": Json Contents: " << contents;
         json jLocal = json::parse(contents);
 
+        auto get_first_string = [](const json &j, const char *key) -> std::string {
+            auto it = j.find(key);
+            if (it == j.end())
+                return {};
+            if (it->is_array()) {
+                if (!it->empty() && (*it)[0].is_string())
+                    return (*it)[0].get<std::string>();
+                return {};
+            }
+            if (it->is_string())
+                return it->get<std::string>();
+            return {};
+        };
+
         if (sVendor == "") {
-            if (jLocal.contains("filament_vendor"))
-                sVendor = jLocal["filament_vendor"][0];
-            else {
+            sVendor = get_first_string(jLocal, "filament_vendor");
+            if (sVendor.empty()) {
                 BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << filepath << " - Not Contains filament_vendor";
             }
         }
 
         if (sType == "") {
-            if (jLocal.contains("filament_type"))
-                sType = jLocal["filament_type"][0];
-            else {
+            sType = get_first_string(jLocal, "filament_type");
+            if (sType.empty()) {
                 BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << filepath << " - Not Contains filament_type";
             }
         }

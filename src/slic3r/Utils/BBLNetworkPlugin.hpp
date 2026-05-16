@@ -104,6 +104,7 @@ typedef int (*func_get_model_publish_url)(void *agent, std::string* url);
 typedef int (*func_get_subtask)(void *agent, BBLModelTask* task, OnGetSubTaskFn getsub_fn);
 typedef int (*func_get_model_mall_home_url)(void *agent, std::string* url);
 typedef int (*func_get_model_mall_detail_url)(void *agent, std::string* url, std::string id);
+typedef int (*func_get_my_token)(void *agent, std::string ticket, unsigned int *http_code, std::string *http_body);
 typedef int (*func_get_my_profile)(void *agent, std::string token, unsigned int *http_code, std::string *http_body);
 typedef int (*func_get_my_token)(void *agent, std::string ticket, unsigned int *http_code, std::string *http_body);
 typedef int (*func_track_enable)(void *agent, bool enable);
@@ -357,6 +358,7 @@ public:
     func_get_subtask get_get_subtask() const { return m_get_subtask; }
     func_get_model_mall_home_url get_get_model_mall_home_url() const { return m_get_model_mall_home_url; }
     func_get_model_mall_detail_url get_get_model_mall_detail_url() const { return m_get_model_mall_detail_url; }
+    func_get_my_token get_get_my_token() const { return m_get_my_token; }
     func_get_my_profile get_get_my_profile() const { return m_get_my_profile; }
     func_get_my_token get_get_my_token() const { return m_get_my_token; }
     func_track_enable get_track_enable() const { return m_track_enable; }
@@ -404,7 +406,7 @@ private:
     NetworkLibraryLoadError m_load_error;
 
     // Legacy network compatibility flag
-    bool m_use_legacy_network{true};
+    bool m_use_legacy_network{false};
 
     // Function pointers
     func_check_debug_consistent m_check_debug_consistent{nullptr};
@@ -491,6 +493,7 @@ private:
     func_get_subtask m_get_subtask{nullptr};
     func_get_model_mall_home_url m_get_model_mall_home_url{nullptr};
     func_get_model_mall_detail_url m_get_model_mall_detail_url{nullptr};
+    func_get_my_token m_get_my_token{nullptr};
     func_get_my_profile m_get_my_profile{nullptr};
     func_get_my_token m_get_my_token{nullptr};
     func_track_enable m_track_enable{nullptr};
