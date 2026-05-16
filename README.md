@@ -6,7 +6,7 @@
 
 ## This version of OrcaSlicer restores full BambuNetwork support for Bambu Lab printers.
 
-You are not limited to LAN only.  
+You are not limited to LAN only.
 It works over the internet just like before, through BambuNetwork, with full functionality for normal use and printing.
 
 ## Installation

@@ -1,5 +1,5 @@
-name: 'Apt Install Deps'
-description: 'Install the packages needed for building and deploying'
+name: "Apt Install Deps"
+description: "Install the packages needed for building and deploying"
 runs:
   using: 'composite'
   steps:

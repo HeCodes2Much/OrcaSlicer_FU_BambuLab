@@ -53,4 +53,4 @@ inline std::string normalize_change_user_payload_string(const std::string& input
     }
 }
 
-}
+} // namespace Slic3r::BambuBridge
